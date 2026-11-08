@@ -1,5 +1,5 @@
 // ==============================================================================
-// 🌱 Irriga.ai Pro-Duo · v1.6.7-Argon — Firmware Autônomo ESP32
+// 🌱 SABIÁ: Sistema Autônomo de Balanço hídrico e Irrigação Assistida · v1.6.7.a
 // ------------------------------------------------------------------------------
 // Espelha o motor único `core/irriga-core.js` em C++:
 //  1. Rega Diária Garantida em 2 turnos (Manhã Cedo 04:00–05:30 + Fim da Tarde
@@ -126,6 +126,20 @@ Preferences prefs;
 bool oledAwake           = true;
 uint32_t lastInteraction = 0;
 uint8_t oledPage         = 0;
+
+// --- Protótipos de Funções Globais ---
+void fecharTodasValvulas();
+void abrirZonaFila(uint8_t idx, float litrosAlvo);
+void despacharFilaSeOcioso();
+void pausarSistema(uint32_t horas);
+void enfileirarOverrideFlex1Hora();
+void recalcularPlanoDoDia();
+void publicarStatusMqtt();
+void desenharOled();
+void configurarRotasHttp();
+void gerenciarMqtt();
+void processarBotoesFisicos();
+void atualizarSensorVazaoETravas();
 
 // --- Utilitários Matemáticos FAO-56 ---
 static inline float clampf(float v, float a, float b) { return v < a ? a : (v > b ? b : v); }
@@ -333,6 +347,7 @@ void processarBotoesFisicos() {
                 pausarSistema(0);
                 btns[i].longHandled = true;
                 beep(200, 2);
+                publicarStatusMqtt();
             }
         } else if (lvl == HIGH && btns[i].lastLevel == LOW) {
             uint32_t held = now - btns[i].downMs;
@@ -349,12 +364,15 @@ void processarBotoesFisicos() {
                     } else {
                         pausarSistema(2);
                     }
+                    publicarStatusMqtt();
                 } else if (i == 1) { // B2: Override +1 Hora Flex (30 min Z1 + 30 min Z2)
                     enfileirarOverrideFlex1Hora();
+                    publicarStatusMqtt();
                 } else if (i == 2) { // B3: Era bom que chovesse (+25% / +50% / OFF)
                     boostPct = (boostPct == 0) ? 25 : (boostPct == 25 ? 50 : 0);
                     boostUntilMs = boostPct > 0 ? (now + 24UL * 3600UL * 1000UL) : 0;
                     recalcularPlanoDoDia();
+                    publicarStatusMqtt();
                 } else if (i == 3) { // B4: Choveu aqui (1/2/3 toques = 5/15/30 mm)
                     rainClicksCount = (now - lastRainClickMs < 4000) ? min<uint8_t>(3, rainClicksCount + 1) : 1;
                     lastRainClickMs = now;
@@ -364,6 +382,7 @@ void processarBotoesFisicos() {
                     }
                     fecharTodasValvulas();
                     recalcularPlanoDoDia();
+                    publicarStatusMqtt();
                 }
             }
         }
@@ -387,7 +406,7 @@ void atualizarSensorVazaoETravas() {
     float litrosNoSegundo = float(pulses) / PULSOS_POR_LITRO_SF1;
     // Em bancada Wokwi sem gerador de pulsos no GPIO 34, simula a vazão da zona aberta
     if (activeZoneIdx >= 0 && pulses == 0) {
-        litrosNoSegundo = zones[activeZoneIdx].flow_lpm / 60.0f;
+        litrosNoSegundo = (zones[activeZoneIdx].flow_lpm / 60.0f) * dtSec;
     }
     currentFlowLpm = (litrosNoSegundo / dtSec) * 60.0f;
 
@@ -461,7 +480,7 @@ void desenharOled() {
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
-    display.println(F("IRRIGA.AI v1.6.7"));
+    display.println(F("IRRIGA.AI v1.6.7.a"));
     display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
 
     display.setCursor(0, 14);
@@ -491,7 +510,10 @@ void publicarStatusMqtt();
 
 void executarComandoGeral(JsonDocument& doc) {
     String acao = doc["acao"] | "";
-    if (acao == "pausar") {
+    if (acao == "ping" || acao == "status" || acao == "obter_status") {
+        publicarStatusMqtt();
+        return;
+    } else if (acao == "pausar") {
         uint32_t h = doc["horas"] | 0;
         pausarSistema(h);
         beep(80, 2);
@@ -573,14 +595,13 @@ void executarComandoGeral(JsonDocument& doc) {
 
 // --- Endpoints HTTP REST para Sincronia com o Web-App ---
 void configurarRotasHttp() {
-    // Inicializa a pilha de rede WiFi (SoftAP + Cliente Wokwi) antes de ligar o servidor HTTP
-    WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP("Irriga-AI", "12345678");
-    WiFi.begin("Wokwi-GUEST", "", 6);
+    // Inicializa a pilha de rede WiFi em modo Station para simulador Wokwi e bancada
+    WiFi.mode(WIFI_STA);
+    WiFi.begin("Wokwi-GUEST", "");
 
     Serial.print("🌐 [WiFi] Conectando a rede Wokwi-GUEST");
     uint32_t t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - t0 < 4000)) {
+    while (WiFi.status() != WL_CONNECTED && (millis() - t0 < 6000)) {
         delay(200);
         Serial.print(".");
     }
@@ -594,7 +615,8 @@ void configurarRotasHttp() {
 
     server.on("/api/status", HTTP_GET, []() {
         JsonDocument doc;
-        doc["v"]          = "1.6.7-argon";
+        doc["v"]          = "1.6.7.a";
+        doc["ts"]         = millis();
         doc["tank_L"]     = lerCaixaLitros();
         doc["filter_pct"] = filter_health_pct;
         doc["flow_lpm"]   = currentFlowLpm;
@@ -661,8 +683,9 @@ void configurarRotasHttp() {
 void publicarStatusMqtt() {
     if (!mqttClient.connected()) return;
     JsonDocument doc;
-    doc["v"]          = "1.6.7-argon";
+    doc["v"]          = "1.6.7.a";
     doc["online"]     = true;
+    doc["ts"]         = millis();
     doc["tank_L"]     = lerCaixaLitros();
     doc["filter_pct"] = filter_health_pct;
     doc["flow_lpm"]   = currentFlowLpm;
@@ -678,7 +701,8 @@ void publicarStatusMqtt() {
     doc["alert"]      = lastAlertMsg;
     String out;
     serializeJson(doc, out);
-    mqttClient.publish(MQTT_TOPIC_STATUS, out.c_str(), true);
+    // Publica status em tempo real (sem flag retain para não criar fantasmas no broker quando offline)
+    mqttClient.publish(MQTT_TOPIC_STATUS, out.c_str(), false);
 }
 
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
@@ -699,31 +723,47 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     }
 }
 
+uint32_t lastWifiCheckMs = 0;
+
 void gerenciarMqtt() {
     uint32_t now = millis();
-    if (WiFi.status() == WL_CONNECTED) {
-        if (!mqttClient.connected()) {
-            if (lastMqttReconnectMs == 0 || (now - lastMqttReconnectMs > 5000)) {
-                lastMqttReconnectMs = now;
-                String clientId = "ESP32-Irriga-" + String((uint32_t)ESP.getEfuseMac(), HEX);
-                Serial.print("☁️ [MQTT] Conectando ao broker HiveMQ... ");
-                const char* willMsg = "{\"v\":\"1.6.7-argon\",\"online\":false,\"active_zone\":0,\"queue_z1_L\":0,\"queue_z2_L\":0,\"alert\":\"ESP32 OFFLINE\"}";
-                if (mqttClient.connect(clientId.c_str(), MQTT_TOPIC_STATUS, 1, true, willMsg)) {
-                    Serial.println("CONECTADO COM SUCESSO!");
-                    mqttClient.subscribe(MQTT_TOPIC_CMD);
-                    mqttClient.subscribe(MQTT_TOPIC_PLAN);
-                    publicarStatusMqtt();
-                    beep(50, 1);
-                } else {
-                    Serial.printf("Falha (rc=%d). Nova tentativa em 5s...\n", mqttClient.state());
-                }
+
+    // 1. Reconexão e garantia do WiFi em background
+    if (WiFi.status() != WL_CONNECTED) {
+        if (lastWifiCheckMs == 0 || (now - lastWifiCheckMs > 8000)) {
+            lastWifiCheckMs = now;
+            Serial.println("🌐 [WiFi] Reconectando a rede Wokwi-GUEST...");
+            WiFi.disconnect();
+            WiFi.begin("Wokwi-GUEST", "");
+        }
+        return;
+    }
+
+    // 2. Conexão ao Broker MQTT com entropia aleatória única por boot
+    if (!mqttClient.connected()) {
+        if (lastMqttReconnectMs == 0 || (now - lastMqttReconnectMs > 4000)) {
+            lastMqttReconnectMs = now;
+            static String uniqueClientId = "";
+            if (uniqueClientId.length() == 0) {
+                uniqueClientId = "SABIA-" + String((uint32_t)ESP.getEfuseMac(), HEX) + "-" + String(random(1000, 9999), HEX);
             }
-        } else {
-            mqttClient.loop();
-            if (now - lastMqttStatusPubMs > 10000) {
-                lastMqttStatusPubMs = now;
+            Serial.printf("☁️ [MQTT] Conectando ao broker HiveMQ (%s)... ", uniqueClientId.c_str());
+            const char* willMsg = "{\"v\":\"1.6.7.a\",\"online\":false,\"active_zone\":0,\"queue_z1_L\":0,\"queue_z2_L\":0,\"alert\":\"SABIÁ OFFLINE\"}";
+            if (mqttClient.connect(uniqueClientId.c_str(), MQTT_TOPIC_STATUS, 1, true, willMsg)) {
+                Serial.println("CONECTADO COM SUCESSO!");
+                mqttClient.subscribe(MQTT_TOPIC_CMD);
+                mqttClient.subscribe(MQTT_TOPIC_PLAN);
                 publicarStatusMqtt();
+                beep(50, 1);
+            } else {
+                Serial.printf("Falha (rc=%d). Nova tentativa em 4s...\n", mqttClient.state());
             }
+        }
+    } else {
+        mqttClient.loop();
+        if (now - lastMqttStatusPubMs > 10000) {
+            lastMqttStatusPubMs = now;
+            publicarStatusMqtt();
         }
     }
 }
@@ -773,7 +813,7 @@ void setup() {
     esp_task_wdt_add(NULL);
 #endif
 
-    Serial.println("🌱 [Irriga.ai] Sistema iniciado com sucesso!");
+    Serial.println("🌱 [SABIÁ] Sistema v1.6.7.a iniciado com sucesso!");
 
     Serial.println("⚙️ [1/3] Calculando plano hídrico do dia...");
     recalcularPlanoDoDia();
@@ -789,7 +829,7 @@ void setup() {
     lastInteraction = millis();
     beep(60, 2);
 
-    Serial.println("✅ [Irriga.ai] Sistema 100% pronto e operacional!");
+    Serial.println("✅ [SABIÁ] Sistema autônomo 100% pronto e operacional!");
 }
 
 void loop() {

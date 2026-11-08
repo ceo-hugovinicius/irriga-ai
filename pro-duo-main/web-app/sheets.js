@@ -47,7 +47,62 @@ function avisoCadeado() {
   </div>`;
 }
 
+const PIN_LOCKOUT_KEY = 'irriga_pin_lockout_ts';
+const PIN_ATTEMPTS_KEY = 'irriga_pin_attempts_cnt';
+
+function verificarLockoutPin() {
+  const lockoutUntil = parseInt(localStorage.getItem(PIN_LOCKOUT_KEY) || '0', 10);
+  const agora = Date.now();
+  if (lockoutUntil > agora) {
+    return Math.ceil((lockoutUntil - agora) / 1000);
+  }
+  return 0;
+}
+
+function registrarErroPin() {
+  const tentativas = parseInt(localStorage.getItem(PIN_ATTEMPTS_KEY) || '0', 10) + 1;
+  localStorage.setItem(PIN_ATTEMPTS_KEY, String(tentativas));
+  if (tentativas >= 5) {
+    const lockoutUntil = Date.now() + 300000; // 5 minutos
+    localStorage.setItem(PIN_LOCKOUT_KEY, String(lockoutUntil));
+    if (typeof audit === 'function') {
+      audit('segurança', '🚨 5 erros consecutivos de PIN: painel bloqueado por 5 minutos (Anti-Brute-Force)', 'segurança');
+    }
+    return { bloqueado: true, segundos: 300 };
+  } else if (tentativas >= 3) {
+    const lockoutUntil = Date.now() + 60000; // 1 minuto
+    localStorage.setItem(PIN_LOCKOUT_KEY, String(lockoutUntil));
+    if (typeof audit === 'function') {
+      audit('segurança', '⚠️ 3 erros consecutivos de PIN: painel bloqueado por 1 minuto (Anti-Brute-Force)', 'segurança');
+    }
+    return { bloqueado: true, segundos: 60 };
+  }
+  return { bloqueado: false, tentativas, restantes: Math.max(1, 3 - tentativas) };
+}
+
+function limparErrosPin() {
+  localStorage.removeItem(PIN_ATTEMPTS_KEY);
+  localStorage.removeItem(PIN_LOCKOUT_KEY);
+}
+
 function abrirModalPin(onSuccess) {
+  const segRest = verificarLockoutPin();
+  if (segRest > 0) {
+    abrirModal(`
+      <div style="text-align:center;padding:16px 0">
+        <div style="font-size:36px">🛑</div>
+        <h3 style="margin-top:6px;color:var(--red)">Painel Bloqueado</h3>
+        <p class="t13 mute" style="margin-top:4px">Excesso de tentativas incorretas de PIN.</p>
+        <div class="card" style="margin:16px 0;background:var(--red-bg);border:1px solid var(--red-bd);padding:12px">
+          <div class="t14 b" style="color:var(--red)">Proteção Anti-Brute-Force Ativa</div>
+          <div class="t13" style="margin-top:4px">Aguarde <b>${segRest} segundos</b> para tentar novamente.</div>
+        </div>
+        <button class="btn full" onclick="fecharModal()">Fechar</button>
+      </div>
+    `);
+    return;
+  }
+
   let pinDigitado = '';
   function atualizarVisorPin() {
     const visor = document.getElementById('pin-visor-dots');
@@ -59,6 +114,10 @@ function abrirModalPin(onSuccess) {
   }
 
   window._digitarPin = function(digito) {
+    if (verificarLockoutPin() > 0) {
+      abrirModalPin(onSuccess);
+      return;
+    }
     if (pinDigitado.length < 4) {
       pinDigitado += digito;
       atualizarVisorPin();
@@ -76,8 +135,15 @@ function abrirModalPin(onSuccess) {
   };
 
   window._confirmarPin = function() {
+    const segRest = verificarLockoutPin();
+    if (segRest > 0) {
+      toast(`🔒 Painel temporariamente bloqueado (${segRest}s restantes).`);
+      abrirModalPin(onSuccess);
+      return;
+    }
     const pinCorreto = S.security?.pin || '1234';
     if (pinDigitado === pinCorreto) {
+      limparErrosPin();
       S.ui.locked = false;
       if (typeof iniciarTimerRelock === 'function') iniciarTimerRelock();
       salvar();
@@ -92,7 +158,13 @@ function abrirModalPin(onSuccess) {
         setTimeout(() => { if (visor) visor.style.transform = 'translateX(-8px)'; }, 70);
         setTimeout(() => { if (visor) visor.style.transform = 'translateX(0)'; }, 140);
       }
-      toast('❌ Senha incorreta! Tente novamente.');
+      const res = registrarErroPin();
+      if (res.bloqueado) {
+        toast(`🚨 Bloqueio de segurança: aguarde ${res.segundos}s para novas tentativas.`);
+        abrirModalPin(onSuccess);
+        return;
+      }
+      toast(`❌ Senha incorreta! Restam ${res.restantes} tentativa(s) antes do bloqueio.`);
       pinDigitado = '';
       atualizarVisorPin();
     }
@@ -102,7 +174,7 @@ function abrirModalPin(onSuccess) {
     <div style="text-align:center;padding:10px 0">
       <div style="font-size:36px">🔒</div>
       <h3 style="margin-top:6px">Destravar Painel</h3>
-      <p class="t13 mute" style="margin-top:2px">Digite a senha de 4 dígitos para liberar alterações.</p>
+      <p class="t13 mute" style="margin-top:2px">Digite o PIN de 4 dígitos para liberar alterações.</p>
       
       <div id="pin-visor-dots" style="display:flex;justify-content:center;gap:12px;margin:20px 0;transition:transform .15s ease">
         <span style="width:14px;height:14px;border-radius:50%;background:var(--line);border:2px solid var(--mute);display:inline-block"></span>
@@ -123,13 +195,12 @@ function abrirModalPin(onSuccess) {
       <div style="margin-top:16px">
         <button class="btn sm" onclick="fecharModal()">Cancelar</button>
       </div>
-      <div class="t11 mute" style="margin-top:8px">PIN padrão inicial: 1234 (alterável em Ajustes)</div>
     </div>
   `);
 }
 
 function trocarPinModal() {
-  if (S.ui.locked) {
+  if (S.ui.locked && S.security?.enabled !== false) {
     solicitarDestravamentoComPin(trocarPinModal);
     return;
   }
@@ -138,7 +209,10 @@ function trocarPinModal() {
     <p class="t13 mute">Defina um novo PIN de 4 dígitos para proteger o painel contra alterações indevidas.</p>
     <div class="field" style="margin-top:14px">
       <label>Novo PIN (4 dígitos numéricos)</label>
-      <input id="input-novo-pin" type="tel" maxlength="4" pattern="[0-9]*" placeholder="Ex: 5820" style="font-size:20px;letter-spacing:6px;text-align:center" />
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="input-novo-pin" type="password" maxlength="4" pattern="[0-9]*" placeholder="••••" style="font-size:22px;letter-spacing:8px;text-align:center" />
+        <button class="btn" type="button" style="height:46px;padding:0 12px" onclick="const inp=document.getElementById('input-novo-pin');if(inp){inp.type=inp.type==='password'?'text':'password';this.innerText=inp.type==='password'?'👁️':'🔒';}">👁️</button>
+      </div>
     </div>
     <div style="display:grid;gap:8px;margin-top:14px">
       <button class="btn primary full" onclick="salvarNovoPin()">Salvar Novo PIN</button>
@@ -157,9 +231,20 @@ function salvarNovoPin() {
   if (!S.security) S.security = { pin: '1234', enabled: true };
   S.security.pin = val;
   salvarConfigCloud();
-  toast(`✅ PIN alterado com sucesso para ${val}!`);
+  toast('✅ PIN alterado com sucesso!');
   abrirAjustes();
 }
+
+window._toggleVerPin = function() {
+  const el = document.getElementById('pin-display-masked');
+  if (el) {
+    if (el.innerText === '••••') {
+      el.innerText = S.security?.pin || '1234';
+    } else {
+      el.innerText = '••••';
+    }
+  }
+};
 
 /* ============================================================================
  * 1. MODAL DAS LUZES DE ESPIA (CLICÁVEL MESMO COM CADEADO 🔒 TRANCADO)
@@ -993,7 +1078,12 @@ document.addEventListener('DOMContentLoaded', () => {
  * 7. AJUSTES GERAIS DO SISTEMA (SIMPLES E DIRETO)
  * ========================================================================== */
 function abrirAjustes() {
+  if (S.ui.locked && S.security?.enabled !== false) {
+    solicitarDestravamentoComPin(abrirAjustes);
+    return;
+  }
   const dis = S.ui.locked ? 'disabled style="opacity:.55"' : '';
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
   abrirModal(`
     <h3>⚙️ Ajustes do Sítio</h3>
     ${avisoCadeado()}
@@ -1034,15 +1124,19 @@ function abrirAjustes() {
         <input ${dis} type="checkbox" style="width:20px;height:20px" ${S.security?.enabled !== false ? 'checked' : ''} onchange="if(!S.security)S.security={pin:'1234',enabled:true};S.security.enabled=this.checked;salvarConfigCloud();render();toast(this.checked?'🔒 PIN ativado':'🔓 PIN desativado');abrirAjustes()" />
       </div>
       <div class="row between" style="margin-top:10px;align-items:center;border-top:1px dashed var(--line);padding-top:8px">
-        <div class="t12 mute">PIN Atual: <b>${S.security?.pin || '1234'}</b></div>
+        <div class="t12 mute">PIN Atual: <b id="pin-display-masked">••••</b> <button class="btn sm" onclick="window._toggleVerPin()" style="padding:2px 8px;font-size:11px;margin-left:4px" title="Ver/Ocultar PIN">👁️</button></div>
         <button ${dis} class="btn sm" onclick="trocarPinModal()">🔑 Alterar PIN</button>
       </div>
     </div>
 
-    <!-- Sincronização em Nuvem (Multi-dispositivos) -->
-    <div style="margin-top:12px">
-      <button class="btn blue full sm" onclick="salvarConfigCloud();sincronizarEsp32();toast('☁️ Configurações sincronizadas na nuvem!')">
-        ☁️ Sincronizar Tudo com a Nuvem Agora
+    <!-- Dispositivo SABIÁ (Hardware Autônomo & Nuvem) -->
+    <div class="card" style="margin-top:14px;background:var(--sub);padding:12px 14px;border:1px solid var(--line)">
+      <div class="t12 mute b" style="text-transform:uppercase;margin-bottom:4px">📡 SABIÁ: Sistema Autônomo de Balanço hídrico e Irrigação Assistida</div>
+      <div class="t13" style="margin-bottom:8px">
+        Status em Campo: <b>${espOnline ? '🟢 SABIÁ Conectado em Tempo Real' : '🟠 SABIÁ Offline (Aguardando Conexão)'}</b>
+      </div>
+      <button class="btn blue full sm" onclick="salvarConfigCloud();sincronizarEsp32();toast('☁️ Sincronização disparada para o SABIÁ!')">
+        ☁️ Sincronizar Tudo com o SABIÁ via Nuvem
       </button>
     </div>
 
@@ -1051,5 +1145,80 @@ function abrirAjustes() {
       <button class="btn danger" ${dis} onclick="if(!S.ui.locked && confirm('Restaurar o estado inicial de fábrica (Canteiro Livre)?')){localStorage.removeItem(KEY);S=novoEstado();salvarConfigCloud();render();fecharModal();toast('Sistema restaurado!')}">♻️ Restaurar padrão</button>
     </div>
     <button class="btn full" style="margin-top:10px" onclick="fecharModal()">Fechar</button>
+  `);
+}
+
+/* ============================================================================
+ * 8. MODAL INFORMATIVO DO SABIÁ (EXPLICAÇÃO DO SERVIDOR AUTÔNOMO)
+ * ========================================================================== */
+function abrirModalSabia() {
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  const tel = S.device?.telemetry;
+  const lastSeenStr = S.device?.lastSeen ? quando(S.device.lastSeen) : 'Nenhuma conexão recente';
+
+  abrirModal(`
+    <div class="row between" style="margin-bottom:8px;align-items:center">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:32px">🦅</span>
+        <div>
+          <h3 style="margin:0">SABIÁ</h3>
+          <div class="t12 mute">Sistema Autônomo de Balanço hídrico e Irrigação Assistida</div>
+        </div>
+      </div>
+      <span class="pill ${espOnline ? 'green' : 'amber'}" style="font-size:12px;font-weight:700">
+        ${espOnline ? '🟢 Online' : '🟠 Offline'}
+      </span>
+    </div>
+
+    <!-- O que é o SABIÁ e o que ele faz pelo agricultor -->
+    <div class="card" style="margin-top:12px;background:var(--sub);border:1px solid var(--line);padding:14px">
+      <div class="t13 b" style="margin-bottom:6px;color:var(--ink)">🌱 O que é o SABIÁ e o que ele faz por você?</div>
+      <p class="t13 ink2" style="margin-bottom:10px;line-height:1.5">
+        O <b>SABIÁ</b> é o servidor de tomada de decisões de irrigação eficiente da sua propriedade. Ele atua como o cérebro autônomo em campo, garantindo que suas plantas recebam exatamente a água necessária com máxima economia e segurança:
+      </p>
+      
+      <div class="list t13">
+        <div class="li" style="padding:6px 0;border-bottom:1px solid var(--line)">
+          <span>💧 <b>Decisão Agronômica Precisa (FAO-56):</b></span>
+          <span class="mute">Calcula a sede real de cada canteiro considerando sol, vento, umidade, palhada e fase da cultura.</span>
+        </div>
+        <div class="li" style="padding:6px 0;border-bottom:1px solid var(--line)">
+          <span>🌅 <b>2 Turnos no Fresco (04h e 16h):</b></span>
+          <span class="mute">Irriga quando a evaporação é menor e dá tempo para o poço artesiano recompor a caixa de 5.000 L.</span>
+        </div>
+        <div class="li" style="padding:6px 0;border-bottom:1px solid var(--line)">
+          <span>🛡️ <b>Fila Anti-Colisão (Filtro 120 Mesh):</b></span>
+          <span class="mute">Nunca abre duas zonas ao mesmo tempo, mantendo a pressão correta e protegendo o filtro de discos.</span>
+        </div>
+        <div class="li" style="padding:6px 0;border-bottom:1px solid var(--line)">
+          <span>🚨 <b>Guardião Hidráulico contra Acidentes:</b></span>
+          <span class="mute">Desliga tudo se a mangueira estourar ou se a tubulação secar (falta de sucção ou bomba parada).</span>
+        </div>
+        <div class="li" style="padding:6px 0">
+          <span>📶 <b>Autonomia sem Internet:</b></span>
+          <span class="mute">Trabalha 100% sozinho na roça. Mesmo que você saia com o celular ou caia a internet, o SABIÁ continua regando.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Telemetria em Tempo Real -->
+    <div class="card" style="margin-top:12px;background:var(--card);border:1px solid var(--line);padding:12px 14px">
+      <div class="t12 mute b" style="text-transform:uppercase;margin-bottom:8px">📊 Diagnóstico & Telemetria em Tempo Real</div>
+      <div class="list t13">
+        <div class="li"><span>Comunicação com o Campo:</span><b>${espOnline ? '🟢 Ativa e Operacional' : '🟠 Aguardando Sinal do SABIÁ'}</b></div>
+        <div class="li"><span>Último Pacote Recebido:</span><b>${lastSeenStr}</b></div>
+        <div class="li"><span>Vazão Hidráulica (Sensor SF1):</span><b>${tel && typeof tel.flow_lpm === 'number' ? tel.flow_lpm.toFixed(1) + ' L/min' : '0.0 L/min'}</b></div>
+        <div class="li"><span>Nível da Caixa d'Água:</span><b>${Math.round(S.tank.level_L ?? 3750)} L (${Math.round((100 * (S.tank.level_L ?? 3750)) / S.tank.capacity)}%)</b></div>
+        <div class="li"><span>Saúde do Filtro 120 Mesh:</span><b>${Math.round(S.filtro?.pct ?? 96)}%</b></div>
+        <div class="li"><span>Operação no Momento:</span><b>${tel && tel.active_zone > 0 ? `Regando Zona ${tel.active_zone} (~${Math.round(tel.active_rem_L || 0)} L restantes)` : 'Repouso / Standby'}</b></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+      <button class="btn blue full" onclick="salvarConfigCloud();sincronizarEsp32();toast('☁️ Sincronização disparada com o SABIÁ!');fecharModal()">
+        🔄 Sincronizar Agora
+      </button>
+      <button class="btn full" onclick="fecharModal()">Fechar</button>
+    </div>
   `);
 }

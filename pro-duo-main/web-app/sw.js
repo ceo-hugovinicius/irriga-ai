@@ -1,7 +1,7 @@
 /* ============================================================================
- * Irriga.ai Pro-Duo · v1.6.7-Argon — Service Worker Offline-First (PWA)
+ * Irriga.ai Pro-Duo · v1.6.7.a (SABIÁ) — Service Worker Offline-First (PWA)
  * ========================================================================== */
-const CACHE_NAME = 'irriga-pro-duo-v1.6.7-argon';
+const CACHE_NAME = 'irriga-pro-duo-v1.6.7a';
 const CORE_ASSETS = [
   './',
   './index.html',

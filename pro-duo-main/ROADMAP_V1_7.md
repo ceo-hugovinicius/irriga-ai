@@ -1,5 +1,8 @@
 # 🗺️ Irriga.ai Pro-Duo — Roadmap Técnico v1.7.0
 
+> [!NOTE]
+> **Antecipação de Versão:** Conforme deliberação técnica, todas as tarefas deste roadmap foram antecipadas e consolidadas diretamente na **versão 1.6.7.a (SABIÁ)**. Consulte o arquivo [ROADMAP_V1_6_7_A.md](file:///c:/irriga-ai/pro-duo-main/ROADMAP_V1_6_7_A.md) para o estado executivo atualizado.
+
 > **Objetivo:** Guia focado para desenvolvimento com Claude na versão 1.7.0.  
 > **Pilares:** Sincronização em tempo real multi-telas, blindagem agronômica de cota, segurança de acesso (PIN) e fidelidade de telemetria/hardware.
 

@@ -18,7 +18,7 @@
  *     e "🔄 Confirmar Troca de Cultura" (com dupla confirmação).
  * ========================================================================== */
 const C = window.IrrigaCore;
-const KEY = 'irriga_argon_v1_5_2';
+const KEY = 'irriga_sabia_v1_6_7a';
 
 /* ---------------- Estado persistente ---------------- */
 let S = carregar();
@@ -27,7 +27,7 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); defe
 
 function novoEstado() {
   const base = C.estadoPadrao();
-  base.versao = '1.6.7-argon';
+  base.versao = '1.6.7.a';
   base.zones[0].crop = null;
   base.zones[1].crop = null;
   return Object.assign(base, {
@@ -59,10 +59,10 @@ function migrarZona(z, idx) {
 
 function carregar() {
   try {
-    const raw = localStorage.getItem(KEY) || localStorage.getItem('irriga_argon_v1_6') || localStorage.getItem('irriga_argon_v1_5');
+    const raw = localStorage.getItem(KEY) || localStorage.getItem('irriga_argon_v1_5_2') || localStorage.getItem('irriga_argon_v1_6') || localStorage.getItem('irriga_argon_v1_5');
     if (raw) {
       const st = Object.assign(novoEstado(), JSON.parse(raw));
-      st.versao = '1.6.7-argon';
+      st.versao = '1.6.7.a';
       st.zones = (st.zones || []).map((z, i) => migrarZona(z, i));
       if (!st.windows || !st.windows.dawn_start) {
         st.windows = { dawn_start: '04:00', end_dawn: '05:30', evening: '16:00', evening_hot: '16:30', pulse_max_min: 90, gap_min: 5 };
@@ -124,7 +124,7 @@ function salvarConfigCloud() {
         soil: S.soil,
         site: S.site,
         tank: S.tank,
-        security: S.security,
+        security: { enabled: S.security ? S.security.enabled !== false : true }, // Higienização: PIN NUNCA trafega no MQTT público
         manual: S.manual,
         boost: S.boost,
         pause: S.pause,
@@ -648,7 +648,7 @@ function iniciarMqttNuvem() {
     try {
       const data = JSON.parse(message.payloadString);
       if (message.destinationName === MQTT_TOPIC_STATUS) {
-        console.log('📩 [MQTT] Telemetria recebida do ESP32:', data);
+        console.log('📩 [MQTT] Telemetria recebida do SABIÁ:', data);
         const isOnline = data && data.online !== false;
         S.device = {
           ...S.device,
@@ -660,6 +660,8 @@ function iniciarMqttNuvem() {
         if (isOnline) {
           if (typeof data.tank_L === 'number') S.tank.level_L = data.tank_L;
           if (typeof data.filter_pct === 'number') S.filtro.pct = data.filter_pct;
+        } else {
+          S.device.telemetry = null;
         }
         salvarLocal();
         render();
@@ -685,7 +687,9 @@ function iniciarMqttNuvem() {
           if (data.soil) S.soil = data.soil;
           if (data.site) S.site = { ...S.site, ...data.site };
           if (data.tank) S.tank = { ...S.tank, ...data.tank };
-          if (data.security) S.security = { ...S.security, ...data.security };
+          if (data.security) {
+            S.security = { ...(S.security || { pin: '1234' }), enabled: data.security.enabled !== false };
+          }
           if (data.hasOwnProperty('manual')) S.manual = data.manual;
           if (data.hasOwnProperty('boost')) S.boost = data.boost || { pct: 0, until: null };
           if (data.hasOwnProperty('pause')) S.pause = data.pause || { until: null, indefinite: false, origem: null };
@@ -711,15 +715,20 @@ function iniciarMqttNuvem() {
       console.log('✅ [MQTT] WebApp conectado com sucesso à nuvem HiveMQ!');
       client.subscribe(MQTT_TOPIC_STATUS);
       client.subscribe(MQTT_TOPIC_CONFIG);
-      // Envia o plano diário atual para o ESP32 assim que conecta
+      // Envia o plano diário atual para o SABIÁ e solicita status imediato assim que conecta
       setTimeout(() => {
         try {
           const planMsg = new Paho.MQTT.Message(JSON.stringify(compilarPacoteEsp32()));
           planMsg.destinationName = MQTT_TOPIC_PLAN;
           planMsg.qos = 1;
           client.send(planMsg);
+
+          const pingMsg = new Paho.MQTT.Message(JSON.stringify({ acao: 'status', senderId: window.MQTT_CLIENT_ID }));
+          pingMsg.destinationName = MQTT_TOPIC_CMD;
+          pingMsg.qos = 1;
+          client.send(pingMsg);
         } catch (e) {}
-      }, 1000);
+      }, 500);
       render();
     },
     onFailure: (err) => {
@@ -741,7 +750,7 @@ async function enviarComando(cmd) {
   salvar(); render();
   const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
   if (!espOnline && cmd && (cmd.acao === 'override_regar_agora' || cmd.acao === 'regar_agora')) {
-    toast('📡 Override registrado na fila! O ESP32 está offline e iniciará a rega ao conectar.');
+    toast('📡 Override registrado na fila! O SABIÁ está offline e iniciará a rega ao conectar.');
   }
   // 1. Envia via Nuvem MQTT (chega em qualquer lugar do mundo em ~0.1s)
   if (window.MQTT_CLIENT && window.MQTT_CONNECTED) {
@@ -750,7 +759,7 @@ async function enviarComando(cmd) {
       msg.destinationName = MQTT_TOPIC_CMD;
       msg.qos = 1;
       window.MQTT_CLIENT.send(msg);
-      console.log('☁️ [MQTT] Comando enviado para o ESP32 via nuvem:', cmd);
+      console.log('☁️ [MQTT] Comando enviado para o SABIÁ via nuvem:', cmd);
     } catch (e) {
       console.warn('Erro ao despachar comando MQTT:', e);
     }
@@ -951,14 +960,17 @@ function renderFilaIrrigacao(agora, ev) {
     const nomeZ = zObj ? zObj.nome.split('—')[0].trim() : `Zona ${activeZoneId}`;
     const cropNome = zObj?.crop && C.CROPS[zObj.crop.id] ? `${C.CROPS[zObj.crop.id].emoji} ${C.CROPS[zObj.crop.id].nome}` : '🟫 Canteiro livre';
     const vazao = zObj ? (C.vazaoZona(zObj, S.soil) || 3.0) : 3.0;
-    const minRest = Math.max(1, Math.round(activeRemL / vazao));
+    const minRest = Math.max(0, Math.round(activeRemL / vazao));
+    const fluxoZero = espOnline && telemetry && telemetry.flow_lpm < 0.2 && activeRemL > 2.0;
     itens.push({
       tipo: 'ativa',
       zona: activeZoneId,
       titulo: `${nomeZ} · ${cropNome}`,
-      sub: `Em irrigação agora · Restam ~${fmtL(activeRemL)} (~${fmtMin(minRest)})`,
-      badge: '💧 Regando',
-      badgeClass: 'blue',
+      sub: fluxoZero
+        ? `⚠️ Fluxo Interrompido / Tubulação Seca (0 L/min) · Restam ~${fmtL(activeRemL)}`
+        : `Em irrigação agora · Restam ~${fmtL(activeRemL)} (~${fmtMin(minRest)})`,
+      badge: fluxoZero ? '⚠️ Tubo Seco' : '💧 Regando',
+      badgeClass: fluxoZero ? 'amber' : 'blue',
       acaoBtn: '✕ Parar',
       btnClass: 'red',
       onclick: 'cancelarRegaManual(event)',
@@ -988,7 +1000,7 @@ function renderFilaIrrigacao(agora, ev) {
     } else if (!espOnline) {
       badgeTexto = '⏳ Pendente WiFi';
       badgeCls = 'amber';
-      subTexto = `Aguardando ESP32 conectar à rede para iniciar · Volume: ${fmtL(f.litros)}`;
+      subTexto = `Aguardando SABIÁ conectar à rede para iniciar · Volume: ${fmtL(f.litros)}`;
     } else if (activeZoneId > 0) {
       const zAtiva = S.zones.find((z) => z.id === activeZoneId);
       const nomeZAtiva = zAtiva ? zAtiva.nome.split('—')[0].trim() : `Zona ${activeZoneId}`;
@@ -1130,7 +1142,7 @@ function render() {
       ${renderEventosRegistrados()}
     </section>
     <p class="mute t12" style="text-align:center;margin-top:4px">
-      Irriga.ai Pro-Duo · <b>v1.6.7-Argon</b> · <a href="./dev-gui.html" style="color:var(--blue);font-weight:750;text-decoration:none">🛠️ Bancada de Testes (Dev-GUI)</a>
+      Irriga.ai Pro-Duo · <b>v1.6.7.a (SABIÁ)</b> · <a href="./dev-gui.html" style="color:var(--blue);font-weight:750;text-decoration:none">🛠️ Bancada de Testes (Dev-GUI)</a>
     </p>
   `;
 }
@@ -1143,7 +1155,7 @@ function renderCabecalho() {
       <div>
         <div class="brand-title">
           <span>Irriga.ai</span>
-          <span class="pill green" style="font-size:11px;padding:2px 8px">1.6.7-Argon</span>
+          <span class="pill green" style="font-size:11px;padding:2px 8px">1.6.7.a</span>
         </div>
         <div class="brand-sub">📍 ${esc(S.site.nome)}</div>
       </div>
@@ -1156,10 +1168,10 @@ function renderCabecalho() {
         <span class="live" style="width:6px;height:6px;background:currentColor"></span>
         <span>${window.MQTT_CONNECTED ? 'Nuvem' : 'Conectando'}</span>
       </span>
-      <span class="pill ${espOnline ? 'green' : 'amber'}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px" title="${espOnline ? 'ESP32 conectado e transmitindo telemetria em tempo real' : 'ESP32 offline (sem sinal há mais de 30s). Comandos na fila serão executados assim que a placa ligar.'}">
+      <button class="pill ${espOnline ? 'green' : 'amber'}" onclick="abrirModalSabia()" style="font-size:11px;padding:3px 9px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;border:1px solid currentColor" title="Toque para entender o que é o SABIÁ e ver a telemetria completa">
         <span class="${espOnline ? 'live' : ''}" style="width:6px;height:6px;border-radius:50%;background:currentColor"></span>
-        <span>${espOnline ? 'ESP32 Online' : 'ESP32 Offline'}</span>
-      </span>
+        <span>${espOnline ? 'SABIÁ Online' : 'SABIÁ Offline'}</span>
+      </button>
       <button class="top-btn ${S.ui.locked ? 'locked' : 'unlocked'}" onclick="alternarCadeado()" title="${S.ui.locked ? 'Toque para destravar com o PIN' : 'Toque para travar'}">
         <span>${S.ui.locked ? '🔒 Travado' : '🔓 Destravado'}</span>
       </button>
@@ -1183,13 +1195,36 @@ function renderHero(P, agora, proxima, semana, usado, espias) {
     subtitulo = 'Lave os discos do filtro 120 Mesh para retomar.';
   } else if (!espOnline && temManualPendente) {
     dotCor = 'var(--amber)';
-    titulo = '📡 Fila aguardando conexão do ESP32';
-    subtitulo = `${fmtL(S.manual.litrosTotal)} enfileirados. Válvulas abrirão e cota será consumida assim que a placa ligar.`;
+    titulo = '📡 Fila aguardando conexão do SABIÁ';
+    subtitulo = `${fmtL(S.manual.litrosTotal)} enfileirados. Válvulas abrirão e cota será consumida assim que o SABIÁ ligar.`;
   } else if (agora) {
     dotCor = 'var(--blue)';
     const z = S.zones.find((x) => x.id === agora.zona);
+    const vazaoZona = z ? (C.vazaoZona(z, S.soil) || 3.0) : 3.0;
+    const telemetry = S.device?.telemetry;
+
+    // Contagem de tempo Hardware-First baseada na telemetria do SABIÁ
+    let minRest;
+    let fluxoInterrompido = false;
+    if (espOnline && telemetry && typeof telemetry.active_rem_L === 'number') {
+      minRest = Math.max(0, Math.round(telemetry.active_rem_L / vazaoZona));
+      if (telemetry.flow_lpm < 0.2 && telemetry.active_rem_L > 2.0) {
+        fluxoInterrompido = true;
+      }
+    } else {
+      minRest = Math.max(1, Math.round((agora.te - Date.now()) / 60000));
+    }
+
     titulo = `💧 Regando ${esc(z.nome.split('—')[0].trim())} agora ${agora.manual ? '(Override Manual)' : ''}`;
-    subtitulo = `Faltam ${fmtMin((agora.te - Date.now()) / 60000)} · ${fmtL(agora.litros)} neste pulso.`;
+    if (fluxoInterrompido) {
+      dotCor = 'var(--amber)';
+      subtitulo = `⚠️ Fluxo Interrompido / Tubulação Seca (0 L/min) · Restam ~${fmtL(telemetry.active_rem_L)}`;
+    } else {
+      const volInfo = (espOnline && telemetry && typeof telemetry.active_rem_L === 'number')
+        ? `Restam ~${fmtL(telemetry.active_rem_L)} (${fmtMin(minRest)})`
+        : `Faltam ${fmtMin(minRest)} · ${fmtL(agora.litros)} neste pulso`;
+      subtitulo = `${volInfo} · Válvula controlada pelo SABIÁ.`;
+    }
   } else if (pausado()) {
     dotCor = 'var(--amber)';
     titulo = S.pause.indefinite ? '⏸️ Regas pausadas' : `⏸️ Pausado (volta ${quando(Date.parse(S.pause.until))})`;

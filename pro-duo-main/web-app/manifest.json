@@ -1,8 +1,8 @@
 {
   "id": "./index.html",
-  "name": "Irriga.ai Pro-Duo · v1.6.7-Argon",
+  "name": "Irriga.ai Pro-Duo · v1.6.7.a (SABIÁ)",
   "short_name": "Irriga.ai",
-  "description": "Gestão inteligente de irrigação por balanço hídrico FAO-56 e luzes de espia em São Vicente do Seridó - PB.",
+  "description": "SABIÁ: Sistema Autônomo de Balanço hídrico e Irrigação Assistida por balanço hídrico FAO-56 em São Vicente do Seridó - PB.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

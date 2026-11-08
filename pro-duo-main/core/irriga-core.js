@@ -688,7 +688,7 @@
       crop: { id: cropId, plantio, anterior },
     });
     return {
-      versao: '1.6.5-argon',
+      versao: '1.6.7-argon',
       site: { nome: 'Sítio — São Vicente do Seridó (PB)', lat: -6.95325, lon: -36.36853, tz: 'America/Fortaleza' },
       soil: 'franco_arenoso',
       tank: { capacity: 5000, level_L: 3750, reserve_pct: 25 },

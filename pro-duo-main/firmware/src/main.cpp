@@ -1,5 +1,5 @@
 // ==============================================================================
-// 🌱 Irriga.ai Pro-Duo · v1.6.5-Argon — Firmware Autônomo ESP32
+// 🌱 Irriga.ai Pro-Duo · v1.6.7-Argon — Firmware Autônomo ESP32
 // ------------------------------------------------------------------------------
 // Espelha o motor único `core/irriga-core.js` em C++:
 //  1. Rega Diária Garantida em 2 turnos (Manhã Cedo 04:00–05:30 + Fim da Tarde
@@ -461,7 +461,7 @@ void desenharOled() {
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
-    display.println(F("IRRIGA.AI v1.6.5"));
+    display.println(F("IRRIGA.AI v1.6.7"));
     display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
 
     display.setCursor(0, 14);
@@ -594,7 +594,7 @@ void configurarRotasHttp() {
 
     server.on("/api/status", HTTP_GET, []() {
         JsonDocument doc;
-        doc["v"]          = "1.6.5-argon";
+        doc["v"]          = "1.6.7-argon";
         doc["tank_L"]     = lerCaixaLitros();
         doc["filter_pct"] = filter_health_pct;
         doc["flow_lpm"]   = currentFlowLpm;
@@ -661,7 +661,7 @@ void configurarRotasHttp() {
 void publicarStatusMqtt() {
     if (!mqttClient.connected()) return;
     JsonDocument doc;
-    doc["v"]          = "1.6.5-argon";
+    doc["v"]          = "1.6.7-argon";
     doc["online"]     = true;
     doc["tank_L"]     = lerCaixaLitros();
     doc["filter_pct"] = filter_health_pct;
@@ -707,7 +707,7 @@ void gerenciarMqtt() {
                 lastMqttReconnectMs = now;
                 String clientId = "ESP32-Irriga-" + String((uint32_t)ESP.getEfuseMac(), HEX);
                 Serial.print("☁️ [MQTT] Conectando ao broker HiveMQ... ");
-                const char* willMsg = "{\"v\":\"1.6.5-argon\",\"online\":false,\"active_zone\":0,\"queue_z1_L\":0,\"queue_z2_L\":0,\"alert\":\"ESP32 OFFLINE\"}";
+                const char* willMsg = "{\"v\":\"1.6.7-argon\",\"online\":false,\"active_zone\":0,\"queue_z1_L\":0,\"queue_z2_L\":0,\"alert\":\"ESP32 OFFLINE\"}";
                 if (mqttClient.connect(clientId.c_str(), MQTT_TOPIC_STATUS, 1, true, willMsg)) {
                     Serial.println("CONECTADO COM SUCESSO!");
                     mqttClient.subscribe(MQTT_TOPIC_CMD);

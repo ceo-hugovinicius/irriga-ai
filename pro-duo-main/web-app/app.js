@@ -27,7 +27,7 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); defe
 
 function novoEstado() {
   const base = C.estadoPadrao();
-  base.versao = '1.6.5-argon';
+  base.versao = '1.6.7-argon';
   base.zones[0].crop = null;
   base.zones[1].crop = null;
   return Object.assign(base, {
@@ -62,7 +62,7 @@ function carregar() {
     const raw = localStorage.getItem(KEY) || localStorage.getItem('irriga_argon_v1_6') || localStorage.getItem('irriga_argon_v1_5');
     if (raw) {
       const st = Object.assign(novoEstado(), JSON.parse(raw));
-      st.versao = '1.6.5-argon';
+      st.versao = '1.6.7-argon';
       st.zones = (st.zones || []).map((z, i) => migrarZona(z, i));
       if (!st.windows || !st.windows.dawn_start) {
         st.windows = { dawn_start: '04:00', end_dawn: '05:30', evening: '16:00', evening_hot: '16:30', pulse_max_min: 90, gap_min: 5 };
@@ -1130,7 +1130,7 @@ function render() {
       ${renderEventosRegistrados()}
     </section>
     <p class="mute t12" style="text-align:center;margin-top:4px">
-      Irriga.ai Pro-Duo · <b>v1.6.5-Argon</b> · <a href="./dev-gui.html" style="color:var(--blue);font-weight:750;text-decoration:none">🛠️ Bancada de Testes (Dev-GUI)</a>
+      Irriga.ai Pro-Duo · <b>v1.6.7-Argon</b> · <a href="./dev-gui.html" style="color:var(--blue);font-weight:750;text-decoration:none">🛠️ Bancada de Testes (Dev-GUI)</a>
     </p>
   `;
 }
@@ -1143,7 +1143,7 @@ function renderCabecalho() {
       <div>
         <div class="brand-title">
           <span>Irriga.ai</span>
-          <span class="pill green" style="font-size:11px;padding:2px 8px">1.6.5-Argon</span>
+          <span class="pill green" style="font-size:11px;padding:2px 8px">1.6.7-Argon</span>
         </div>
         <div class="brand-sub">📍 ${esc(S.site.nome)}</div>
       </div>

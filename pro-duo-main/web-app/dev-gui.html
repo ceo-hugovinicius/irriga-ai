@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Irriga.ai · Bancada de Engenharia (Dev-GUI v1.5.2-Argon)</title>
+  <title>Irriga.ai · Bancada de Engenharia (Dev-GUI v1.6.7-Argon)</title>
   <link rel="icon" type="image/svg+xml" href="./icon.svg" />
   <style>
     :root {
@@ -35,7 +35,7 @@
   <div class="wrap">
     <header>
       <div>
-        <h1>🛠️ Irriga.ai Pro-Duo · Bancada Dev-GUI (v1.5.2-Argon)</h1>
+        <h1>🛠️ Irriga.ai Pro-Duo · Bancada Dev-GUI (v1.6.7-Argon)</h1>
         <div style="color:var(--mute);font-size:13px">Sincronizada em tempo real com <code>index.html</code> via <code>localStorage</code> · Motor 2 Turnos + Fita por Metro</div>
       </div>
       <div style="display:flex;gap:8px">
@@ -173,7 +173,7 @@
       let oledLines = [];
       if (oledPage === 0) {
         oledLines = [
-          `IRRIGA.AI v1.5.2-ARGON [P1]`,
+          `IRRIGA.AI v1.6.7-ARGON [P1]`,
           `Status: ${S.pause?.indefinite || (S.pause?.until && Date.parse(S.pause.until) > Date.now()) ? 'PAUSADO' : '2 TURNOS (04h/16h)'}`,
           `Pedido Real: ${Math.round(p.pedidoRealL)} L`,
           `Liberado/Cota: ${Math.round(p.totalL)} / ${S.quota.daily_L} L`,

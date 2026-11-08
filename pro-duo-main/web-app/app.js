@@ -590,9 +590,18 @@ function iniciarMqttNuvem() {
       const data = JSON.parse(message.payloadString);
       if (message.destinationName === MQTT_TOPIC_STATUS) {
         console.log('📩 [MQTT] Telemetria recebida do ESP32:', data);
-        S.device = { ...S.device, online: true, lastSeen: Date.now(), status: data, telemetry: data };
-        if (typeof data.tank_L === 'number') S.tank.level_L = data.tank_L;
-        if (typeof data.filter_pct === 'number') S.filtro.pct = data.filter_pct;
+        const isOnline = data && data.online !== false;
+        S.device = {
+          ...S.device,
+          online: isOnline,
+          lastSeen: isOnline ? Date.now() : (S.device?.lastSeen || 0),
+          status: data,
+          telemetry: isOnline ? data : null,
+        };
+        if (isOnline) {
+          if (typeof data.tank_L === 'number') S.tank.level_L = data.tank_L;
+          if (typeof data.filter_pct === 'number') S.filtro.pct = data.filter_pct;
+        }
         salvarLocal();
         render();
       } else if (message.destinationName === MQTT_TOPIC_CONFIG) {
@@ -671,6 +680,10 @@ function iniciarMqttNuvem() {
 
 async function enviarComando(cmd) {
   salvar(); render();
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  if (!espOnline && cmd && (cmd.acao === 'override_regar_agora' || cmd.acao === 'regar_agora')) {
+    toast('📡 Override registrado na fila! O ESP32 está offline e iniciará a rega ao conectar.');
+  }
   // 1. Envia via Nuvem MQTT (chega em qualquer lugar do mundo em ~0.1s)
   if (window.MQTT_CLIENT && window.MQTT_CONNECTED) {
     try {
@@ -844,10 +857,27 @@ function gerarLuzesEspia(P) {
 
 function renderFilaIrrigacao(agora, ev) {
   const telemetry = S.device?.telemetry;
-  const activeZoneId = (telemetry && typeof telemetry.active_zone === 'number') ? telemetry.active_zone : (agora ? agora.zona : 0);
-  const activeRemL = (telemetry && typeof telemetry.active_rem_L === 'number') ? telemetry.active_rem_L : (agora ? Math.round(agora.litrosRestantes || agora.litros || 0) : 0);
-  const queueZ1 = (telemetry && typeof telemetry.queue_z1_L === 'number') ? telemetry.queue_z1_L : 0;
-  const queueZ2 = (telemetry && typeof telemetry.queue_z2_L === 'number') ? telemetry.queue_z2_L : 0;
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  const activeZoneId = (espOnline && telemetry && typeof telemetry.active_zone === 'number') ? telemetry.active_zone : (agora ? agora.zona : 0);
+  const activeRemL = (espOnline && telemetry && typeof telemetry.active_rem_L === 'number') ? telemetry.active_rem_L : (agora ? Math.round(agora.litrosRestantes || agora.litros || 0) : 0);
+  const queueZ1 = (espOnline && telemetry && typeof telemetry.queue_z1_L === 'number') ? telemetry.queue_z1_L : 0;
+  const queueZ2 = (espOnline && telemetry && typeof telemetry.queue_z2_L === 'number') ? telemetry.queue_z2_L : 0;
+
+  // Extrai volumes pendentes de S.manual (para exibição imediata caso o ESP32 esteja offline ou em sincronia)
+  let manualZ1 = 0;
+  let manualZ2 = 0;
+  if (S.manual && Array.isArray(S.manual.eventos)) {
+    const n = Date.now();
+    S.manual.eventos.forEach((e) => {
+      if (activeZoneId !== e.zona || e.ts > n) {
+        if (e.zona === 1) manualZ1 += (e.litros || 0);
+        if (e.zona === 2) manualZ2 += (e.litros || 0);
+      }
+    });
+  }
+
+  const filaZ1 = Math.round(Math.max(queueZ1, manualZ1));
+  const filaZ2 = Math.round(Math.max(queueZ2, manualZ2));
 
   const itens = [];
   const emPausa = pausado();
@@ -876,10 +906,10 @@ function renderFilaIrrigacao(agora, ev) {
     });
   }
 
-  // 2. Fila do ESP32 (Override / Fila)
+  // 2. Fila (Zonas que possuem água pendente e não são a zona ativa atual)
   const filaEsp = [
-    { id: 1, litros: Math.round(queueZ1) },
-    { id: 2, litros: Math.round(queueZ2) },
+    { id: 1, litros: filaZ1 },
+    { id: 2, litros: filaZ2 },
   ];
   const itensNaEspera = filaEsp.filter((f) => f.litros >= 2 && f.id !== activeZoneId);
 
@@ -896,6 +926,10 @@ function renderFilaIrrigacao(agora, ev) {
       badgeTexto = '⏸️ Pausado';
       badgeCls = 'amber';
       subTexto = `Pausado pelo agricultor · Toque em "Retomar" no topo para liberar os ${fmtL(f.litros)}`;
+    } else if (!espOnline) {
+      badgeTexto = '⏳ Pendente WiFi';
+      badgeCls = 'amber';
+      subTexto = `Aguardando ESP32 conectar à rede para iniciar · Volume: ${fmtL(f.litros)}`;
     } else if (activeZoneId > 0) {
       const zAtiva = S.zones.find((z) => z.id === activeZoneId);
       const nomeZAtiva = zAtiva ? zAtiva.nome.split('—')[0].trim() : `Zona ${activeZoneId}`;
@@ -1043,6 +1077,7 @@ function render() {
 }
 
 function renderCabecalho() {
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
   return `<header class="top">
     <div class="brand-box">
       <div class="brand-logo">🌱</div>
@@ -1058,9 +1093,13 @@ function renderCabecalho() {
       <button class="top-btn" onclick="forcarAtualizacaoManual()" title="Sincronizar dados agora">
         <span>🔄</span>
       </button>
-      <span class="pill ${window.MQTT_CONNECTED ? 'green' : 'amber'}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px" title="${window.MQTT_CONNECTED ? 'Conectado à Nuvem em Tempo Real' : 'Conectando à Nuvem...'}">
+      <span class="pill ${window.MQTT_CONNECTED ? 'green' : 'amber'}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px" title="${window.MQTT_CONNECTED ? 'Nuvem Conectada ao Broker MQTT' : 'Conectando ao Broker MQTT...'}">
         <span class="live" style="width:6px;height:6px;background:currentColor"></span>
         <span>${window.MQTT_CONNECTED ? 'Nuvem' : 'Conectando'}</span>
+      </span>
+      <span class="pill ${espOnline ? 'green' : 'amber'}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px" title="${espOnline ? 'ESP32 conectado e transmitindo telemetria em tempo real' : 'ESP32 offline (sem sinal há mais de 30s). Comandos na fila serão executados assim que a placa ligar.'}">
+        <span class="${espOnline ? 'live' : ''}" style="width:6px;height:6px;border-radius:50%;background:currentColor"></span>
+        <span>${espOnline ? 'ESP32 Online' : 'ESP32 Offline'}</span>
       </span>
       <button class="top-btn ${S.ui.locked ? 'locked' : 'unlocked'}" onclick="alternarCadeado()" title="${S.ui.locked ? 'Toque para destravar com o PIN' : 'Toque para travar'}">
         <span>${S.ui.locked ? '🔒 Travado' : '🔓 Destravado'}</span>

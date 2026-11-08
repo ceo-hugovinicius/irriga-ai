@@ -510,30 +510,32 @@ void executarComandoGeral(JsonDocument& doc) {
     } else if (acao == "regar_agora" || acao == "override_regar_agora") {
         if (doc["zonas"].is<JsonArray>()) {
             JsonArray zs = doc["zonas"].as<JsonArray>();
-            // Zera fila anterior para eliminar resíduos de comandos anteriores
-            queueLiters[0] = 0.0f;
-            queueLiters[1] = 0.0f;
-            uint8_t primeiroIdx = 0;
-            bool temPrimeiro = false;
+            isPaused = false;
+            pauseIndefinite = false;
+            uint8_t primeiroZIdx = 255;
 
             for (JsonObject zo : zs) {
                 int id = zo["zona"] | 0;
                 float lit = zo["litros"] | 0.0f;
                 if (id >= 1 && id <= 2 && lit >= 1.0f) {
-                    queueLiters[id - 1] = lit;
-                    if (!temPrimeiro) {
-                        primeiroIdx = id - 1;
-                        temPrimeiro = true;
+                    uint8_t zIdx = id - 1;
+                    if (primeiroZIdx == 255) primeiroZIdx = zIdx;
+                    if (activeZoneIdx == zIdx) {
+                        // Se a zona já está irrigando agora, soma no alvo atual
+                        activeTargetLiters += lit;
+                    } else {
+                        // Empilha na fila da zona sem zerar o que já tinha!
+                        queueLiters[zIdx] += lit;
                     }
                 }
             }
-            isPaused = false;
-            pauseIndefinite = false;
-            if (temPrimeiro && queueLiters[primeiroIdx] >= 2.0f) {
-                fecharTodasValvulas();
-                float l = queueLiters[primeiroIdx];
-                queueLiters[primeiroIdx] = 0.0f;
-                abrirZonaFila(primeiroIdx, l);
+            // Se nenhuma zona estiver aberta, prioriza a zona solicitada no comando
+            if (activeZoneIdx < 0 && primeiroZIdx <= 1 && queueLiters[primeiroZIdx] >= 2.0f) {
+                float l = queueLiters[primeiroZIdx];
+                queueLiters[primeiroZIdx] = 0.0f;
+                abrirZonaFila(primeiroZIdx, l);
+            } else {
+                despacharFilaSeOcioso();
             }
         } else {
             enfileirarOverrideFlex1Hora();
@@ -657,6 +659,7 @@ void publicarStatusMqtt() {
     if (!mqttClient.connected()) return;
     JsonDocument doc;
     doc["v"]          = "1.6.5-argon";
+    doc["online"]     = true;
     doc["tank_L"]     = lerCaixaLitros();
     doc["filter_pct"] = filter_health_pct;
     doc["flow_lpm"]   = currentFlowLpm;
@@ -698,7 +701,8 @@ void gerenciarMqtt() {
                 lastMqttReconnectMs = now;
                 String clientId = "ESP32-Irriga-" + String((uint32_t)ESP.getEfuseMac(), HEX);
                 Serial.print("☁️ [MQTT] Conectando ao broker HiveMQ... ");
-                if (mqttClient.connect(clientId.c_str())) {
+                const char* willMsg = "{\"v\":\"1.6.5-argon\",\"online\":false,\"active_zone\":0,\"queue_z1_L\":0,\"queue_z2_L\":0,\"alert\":\"ESP32 OFFLINE\"}";
+                if (mqttClient.connect(clientId.c_str(), MQTT_TOPIC_STATUS, 1, true, willMsg)) {
                     Serial.println("CONECTADO COM SUCESSO!");
                     mqttClient.subscribe(MQTT_TOPIC_CMD);
                     mqttClient.subscribe(MQTT_TOPIC_PLAN);

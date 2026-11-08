@@ -446,6 +446,11 @@ void desenharOled() {
 
 // --- Endpoints HTTP REST para Sincronia com o Web-App ---
 void configurarRotasHttp() {
+    // Inicializa a pilha de rede WiFi (SoftAP + Cliente Wokwi) antes de ligar o servidor HTTP
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP("Irriga-AI", "12345678");
+    WiFi.begin("Wokwi-GUEST", "", 6);
+
     server.enableCORS(true);
 
     server.on("/api/status", HTTP_GET, []() {
@@ -593,17 +598,24 @@ void setup() {
 
     Serial.println("🌱 [Irriga.ai] Sistema iniciado com sucesso!");
 
+    Serial.println("⚙️ [1/3] Calculando plano hídrico do dia...");
     recalcularPlanoDoDia();
+
+    Serial.println("🌐 [2/3] Iniciando WiFi e Servidor HTTP...");
     configurarRotasHttp();
+
+    Serial.println("🔔 [3/3] Inicializando buzzer e interface...");
     lastInteraction = millis();
     beep(60, 2);
+
+    Serial.println("✅ [Irriga.ai] Sistema 100% pronto e operacional!");
 }
 
 void loop() {
-    esp_task_wdt_reset();
     server.handleClient();
     processarBotoesFisicos();
     atualizarSensorVazaoETravas();
+    delay(2);
 
     if (oledAwake && (millis() - lastInteraction > OLED_SLEEP_MS)) {
         oledAwake = false;

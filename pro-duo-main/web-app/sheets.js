@@ -191,6 +191,64 @@ function abrirEspia(id) {
   `);
 }
 
+function abrirModalCota() {
+  const P = planos();
+  const pedidoRealL = P.pHoje.pedidoRealL || 0;
+  const liberadoAutoL = P.pHoje.totalL || 0;
+  const manualExtraL = manualLitrosHoje();
+  const gastoTotalDiaL = liberadoAutoL + manualExtraL;
+  const deficitSedeL = Math.max(0, pedidoRealL - gastoTotalDiaL);
+  const passandoSede = deficitSedeL >= 5;
+  const cotaL = S.quota.daily_L;
+  const saldoCotaL = Math.max(0, cotaL - gastoTotalDiaL);
+  const pctCota = Math.round((100 * gastoTotalDiaL) / Math.max(1, cotaL));
+  const nivelCaixa = S.tank.level_L ?? 5000;
+  const pctCaixa = Math.round((100 * nivelCaixa) / S.tank.capacity);
+
+  abrirModal(`
+    <div class="row between" style="margin-bottom:8px">
+      <span class="pill ${passandoSede ? 'red' : (gastoTotalDiaL > cotaL ? 'blue' : 'green')}">
+        ${passandoSede ? '⚠️ Alerta de Sede' : (gastoTotalDiaL > cotaL ? '💧 Cota Ultrapassada (Override)' : '✅ Cota em Ordem')}
+      </span>
+      <span class="t12 mute">${S.ui.locked ? '🔒 Consulta livre' : '🔓 Painel aberto'}</span>
+    </div>
+    <h3>🚰 Painel Hídrico & Cota de Água</h3>
+    <p class="t14 ink2" style="margin-top:4px">
+      Controle do volume diário de água do sítio para proteger o poço e evitar sede nas plantas.
+    </p>
+
+    <div class="card" style="margin-top:12px;background:var(--sub);padding:12px 14px">
+      <div class="list t13">
+        <div class="li"><span>🚰 Cota diária autorizada</span><b>${fmtL(cotaL)}</b></div>
+        <div class="li"><span>🌱 Pedido real das culturas</span><b>${fmtL(pedidoRealL)}</b></div>
+        <div class="li"><span>⚙️ Programado automático</span><b>${fmtL(liberadoAutoL)}</b></div>
+        <div class="li"><span>💧 Override manual liberado</span><b>${fmtL(manualExtraL)}</b></div>
+        <div class="li" style="border-top:1px dashed var(--line);padding-top:8px">
+          <span><b>📊 Total do dia</b></span>
+          <b>${fmtL(gastoTotalDiaL)} (${pctCota}%)</b>
+        </div>
+        <div class="li">
+          <span>${gastoTotalDiaL > cotaL ? '⚠️ Acima da cota' : '🟢 Saldo restante na cota'}</span>
+          <b>${gastoTotalDiaL > cotaL ? '+' + fmtL(gastoTotalDiaL - cotaL) : fmtL(saldoCotaL)}</b>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:10px;background:var(--card);padding:10px 14px;border:1px solid var(--line)">
+      <div class="row between t13">
+        <span>🪣 Caixa d'água de 5.000 L</span>
+        <b>${fmtL(nivelCaixa)} (${pctCaixa}%)</b>
+      </div>
+      <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${pctCaixa}%"></div></div>
+    </div>
+
+    <div style="display:grid;gap:8px;margin-top:14px">
+      <button class="btn primary full" onclick="fecharModal();abrirAjustes()">⚙️ Alterar Cota Diária ou Nível da Caixa</button>
+      <button class="btn full" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
+}
+
 /* ============================================================================
  * 2. OS 4 BOTÕES DE AÇÃO HUMANA + NOVO OVERRIDE "REGAR AGORA" (HORAS ⇄ LITROS)
  * ========================================================================== */
@@ -450,8 +508,8 @@ function abrirBoost() {
     <h3>🌧️ "Era bom que chovesse"</h3>
     <p class="t14 ink2">Achou o dia muito quente ou seco? Aumente a água das próximas <b>24 horas</b> com 1 toque. Depois volta sozinho ao normal.</p>
     <div style="display:grid;gap:8px;margin-top:14px">
-      <button class="btn ${atual === 25 ? 'primary' : ''} full" onclick="S.boost={pct:25,until:new Date(Date.now()+86400e3).toISOString()};S.boostLog.push(hoje());audit('app','🌧️ Era bom que chovesse: +25% por 24 h','boost',{pct:25});enviarComando({acao:'boost',pct:25});fecharModal();toast('🌧️ +25% ativado por 24 horas!')">🌧️ Mais água (+25% por 24 horas)</button>
-      <button class="btn ${atual === 50 ? 'primary' : ''} full" onclick="S.boost={pct:50,until:new Date(Date.now()+86400e3).toISOString()};S.boostLog.push(hoje());audit('app','🌧️ Era bom que chovesse: +50% por 24 h','boost',{pct:50});enviarComando({acao:'boost',pct:50});fecharModal();toast('⛈️ +50% ativado por 24 horas!')">⛈️ Bastante água (+50% por 24 horas)</button>
+      <button class="btn ${atual === 25 ? 'primary' : ''} full" onclick="S.boost={pct:25,until:new Date(Date.now()+86400e3).toISOString()};S.boostLog.push(hoje());audit('app','🌧️ Era bom que chovesse: +25% por 24 h','boost',{pct:25});enviarComando({acao:'boost',pct:25});salvarConfigCloud();sincronizarEsp32();salvarLocal();render();fecharModal();toast('🌧️ +25% ativado por 24 horas!')">🌧️ Mais água (+25% por 24 horas)</button>
+      <button class="btn ${atual === 50 ? 'primary' : ''} full" onclick="S.boost={pct:50,until:new Date(Date.now()+86400e3).toISOString()};S.boostLog.push(hoje());audit('app','🌧️ Era bom que chovesse: +50% por 24 h','boost',{pct:50});enviarComando({acao:'boost',pct:50});salvarConfigCloud();sincronizarEsp32();salvarLocal();render();fecharModal();toast('⛈️ +50% ativado por 24 horas!')">⛈️ Bastante água (+50% por 24 horas)</button>
       ${atual > 0 ? `<button class="btn danger full" onclick="cancelarBoost();fecharModal()">✕ Cancelar reforço (+${atual}%)</button>` : ''}
       <button class="btn full" onclick="fecharModal()">Fechar</button>
     </div>
@@ -578,15 +636,15 @@ function abrirZona(i) {
     <div class="field">
       <label>🌾 Cobertura morta no solo (Palhada)</label>
       <div class="seg">
-        <button ${dis} class="${!z.mulch ? 'sel' : ''}" onclick="if(!S.ui.locked){S.zones[${i}].mulch=false;salvar();render();abrirZona(${i});}">Terra descoberta</button>
-        <button ${dis} class="${z.mulch ? 'sel' : ''}" onclick="if(!S.ui.locked){S.zones[${i}].mulch=true;audit('app','🌾 Palhada ativada na Zona ${z.id}','config');salvar();render();abrirZona(${i});}">🌾 Com palhada (−15% água)</button>
+        <button ${dis} class="${!z.mulch ? 'sel' : ''}" onclick="if(!S.ui.locked){S.zones[${i}].mulch=false;salvarConfigCloud();sincronizarEsp32();salvarLocal();render();abrirZona(${i});}">Terra descoberta</button>
+        <button ${dis} class="${z.mulch ? 'sel' : ''}" onclick="if(!S.ui.locked){S.zones[${i}].mulch=true;audit('app','🌾 Palhada ativada na Zona ${z.id}','config');salvarConfigCloud();sincronizarEsp32();salvarLocal();render();abrirZona(${i});}">🌾 Com palhada (−15% água)</button>
       </div>
     </div>
 
     <div class="field">
       <label>🎛️ Ajuste fino permanente da zona (${z.fine_pct >= 0 ? '+' : ''}${z.fine_pct || 0}%)</label>
       <div class="seg">
-        ${[-20, -10, 0, 10, 20].map((v) => `<button ${dis} class="${(z.fine_pct || 0) === v ? 'sel' : ''}" onclick="if(!S.ui.locked){S.zones[${i}].fine_pct=${v};audit('app','Zona ${z.id}: ajuste fino ${v > 0 ? '+' + v : v}%','config');salvar();render();abrirZona(${i});}">${v > 0 ? '+' + v : v}%</button>`).join('')}
+        ${[-20, -10, 0, 10, 20].map((v) => `<button ${dis} class="${(z.fine_pct || 0) === v ? 'sel' : ''}" onclick="if(!S.ui.locked){S.zones[${i}].fine_pct=${v};audit('app','Zona ${z.id}: ajuste fino ${v > 0 ? '+' + v : v}%','config');salvarConfigCloud();sincronizarEsp32();salvarLocal();render();abrirZona(${i});}">${v > 0 ? '+' + v : v}%</button>`).join('')}
       </div>
     </div>
 
@@ -951,17 +1009,17 @@ function abrirAjustes() {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="field">
         <label>Cota diária máxima (L)</label>
-        <input ${dis} type="number" step="50" min="100" max="5000" value="${S.quota.daily_L}" onchange="S.quota.daily_L=C.clamp(Number(this.value),100,5000);audit('app','Cota: '+S.quota.daily_L+' L','config');salvar();render()" />
+        <input ${dis} type="number" step="50" min="100" max="5000" value="${S.quota.daily_L}" onchange="S.quota.daily_L=C.clamp(Number(this.value),100,5000);audit('app','Cota: '+S.quota.daily_L+' L','config');salvarConfigCloud();sincronizarEsp32();salvarLocal();render()" />
       </div>
       <div class="field">
         <label>Água na caixa 5.000 L</label>
-        <input ${dis} type="number" step="100" min="0" max="5000" value="${Math.round(S.tank.level_L)}" onchange="S.tank.level_L=C.clamp(Number(this.value),0,5000);salvar();render()" />
+        <input ${dis} type="number" step="100" min="0" max="5000" value="${Math.round(S.tank.level_L)}" onchange="S.tank.level_L=C.clamp(Number(this.value),0,5000);salvarConfigCloud();sincronizarEsp32();salvarLocal();render()" />
       </div>
     </div>
 
     <div class="field">
       <label>Tipo de terra do sítio</label>
-      <select ${dis} onchange="S.soil=this.value;audit('app','Solo: '+this.value,'config');salvarConfigCloud();render()">
+      <select ${dis} onchange="S.soil=this.value;audit('app','Solo: '+this.value,'config');salvarConfigCloud();sincronizarEsp32();salvarLocal();render()">
         ${Object.entries(C.SOLOS).map(([k, v]) => `<option value="${k}" ${S.soil === k ? 'selected' : ''}>${v.nome}</option>`).join('')}
       </select>
     </div>

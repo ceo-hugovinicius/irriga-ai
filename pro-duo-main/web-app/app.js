@@ -123,11 +123,13 @@ function salvarConfigCloud() {
         quota: S.quota,
         soil: S.soil,
         site: S.site,
+        tank: S.tank,
         security: S.security,
         manual: S.manual,
         boost: S.boost,
         pause: S.pause,
-        chuvaLocal: S.chuvaLocal,
+        chuvaLocal: S.chuvaLocal || {},
+        auditoria: (S.auditoria || []).slice(0, 30),
       };
       const msg = new Paho.MQTT.Message(JSON.stringify(cfgPayload));
       msg.destinationName = MQTT_TOPIC_CONFIG;
@@ -457,6 +459,7 @@ function cancelarChuvaHoje(ev) {
     delete S.chuvaLocal[t];
   }
   S.auditoria = S.auditoria.filter((a) => !(a.tipo === 'chuva' && a.meta?.date === t));
+  enviarComando({ acao: 'cancelar_chuva', mm });
   salvarConfigCloud();
   sincronizarEsp32();
   salvarLocal(); render();
@@ -513,14 +516,17 @@ function cancelarEventoRegistrado(id) {
   }
 
   S.auditoria.splice(idx, 1);
-  salvar();
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal();
   render();
   toast('🗑️ Evento cancelado e removido!');
 }
 
 function limparHistoricoEventos() {
   S.auditoria = [];
-  salvar();
+  salvarConfigCloud();
+  salvarLocal();
   render();
   toast('🗑️ Histórico de eventos limpo!');
 }
@@ -590,11 +596,13 @@ function iniciarMqttNuvem() {
           if (data.quota) S.quota = { ...S.quota, ...data.quota };
           if (data.soil) S.soil = data.soil;
           if (data.site) S.site = { ...S.site, ...data.site };
+          if (data.tank) S.tank = { ...S.tank, ...data.tank };
           if (data.security) S.security = { ...S.security, ...data.security };
           if (data.hasOwnProperty('manual')) S.manual = data.manual;
-          if (data.boost) S.boost = { ...S.boost, ...data.boost };
-          if (data.pause) S.pause = { ...S.pause, ...data.pause };
-          if (data.chuvaLocal) S.chuvaLocal = { ...S.chuvaLocal, ...data.chuvaLocal };
+          if (data.hasOwnProperty('boost')) S.boost = data.boost || { pct: 0, until: null };
+          if (data.hasOwnProperty('pause')) S.pause = data.pause || { until: null, indefinite: false, origem: null };
+          if (data.hasOwnProperty('chuvaLocal')) S.chuvaLocal = data.chuvaLocal || {};
+          if (Array.isArray(data.auditoria)) S.auditoria = data.auditoria;
           salvarLocal();
           render();
         }
@@ -971,6 +979,9 @@ function renderCabecalho() {
       </div>
     </div>
     <div class="top-actions">
+      <button class="top-btn" onclick="forcarAtualizacaoManual()" title="Sincronizar dados agora">
+        <span>🔄</span>
+      </button>
       <span class="pill ${window.MQTT_CONNECTED ? 'green' : 'amber'}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px" title="${window.MQTT_CONNECTED ? 'Conectado à Nuvem em Tempo Real' : 'Conectando à Nuvem...'}">
         <span class="live" style="width:6px;height:6px;background:currentColor"></span>
         <span>${window.MQTT_CONNECTED ? 'Nuvem' : 'Conectando'}</span>
@@ -1062,7 +1073,7 @@ function renderHero(P, agora, proxima, semana, usado, espias) {
 
       <!-- Direita: Água do Dia (Pedido Real vs. Liberado na Cota + Caixa 5.000 L) -->
       <div class="cota-panel">
-        <div class="ring-wrap" onclick="abrirEspia('cota')" title="Toque para ver detalhes da cota">
+        <div class="ring-wrap" onclick="abrirModalCota()" title="Toque para ver detalhes da cota">
           <svg viewBox="0 0 78 78">
             <circle cx="39" cy="39" r="${r}" stroke="var(--line)" stroke-width="7" fill="none" />
             <circle cx="39" cy="39" r="${r}" stroke="${corAnel}" stroke-width="7" fill="none"
@@ -1134,7 +1145,7 @@ function renderQuatroBotoes(agora) {
       <div class="tile-top">
         <div class="tile-ic">💧</div>
         ${manualAtivo
-          ? `<button class="tile-cancel" onclick="cancelarRegaManual(event)">✕ Parar</button>`
+          ? `<button class="tile-cancel" onclick="event.stopPropagation();cancelarRegaManual(event)">✕ Parar</button>`
           : `<button class="pill blue" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();botaoFisicoFlex1Hora('app')" title="Adiciona +1 hora (30 min em cada zona) agora">+1h Flex</button>`}
       </div>
       <div>
@@ -1147,7 +1158,7 @@ function renderQuatroBotoes(agora) {
     <div class="tile ${bAtivo ? 'active-blue' : ''}" onclick="abrirBoost()" role="button" tabindex="0">
       <div class="tile-top">
         <div class="tile-ic">🌧️</div>
-        ${bAtivo ? `<button class="tile-cancel" onclick="cancelarBoost(event)">✕ Desligar</button>` : '<span class="t12 mute">Reforço 24h</span>'}
+        ${bAtivo ? `<button class="tile-cancel" onclick="event.stopPropagation();cancelarBoost(event)">✕ Desligar</button>` : '<span class="t12 mute">Reforço 24h</span>'}
       </div>
       <div>
         <div class="tile-title">Era Bom Chover</div>
@@ -1159,7 +1170,7 @@ function renderQuatroBotoes(agora) {
     <div class="tile ${chuvaHoje ? 'active-green' : ''}" onclick="abrirChuva()" role="button" tabindex="0">
       <div class="tile-top">
         <div class="tile-ic">☔</div>
-        ${chuvaHoje ? `<button class="tile-cancel" onclick="cancelarChuvaHoje(event)">✕ Desfazer</button>` : '<span class="t12 mute">Anotar chuva</span>'}
+        ${chuvaHoje ? `<button class="tile-cancel" onclick="event.stopPropagation();cancelarChuvaHoje(event)">✕ Desfazer</button>` : '<span class="t12 mute">Anotar chuva</span>'}
       </div>
       <div>
         <div class="tile-title">Choveu Aqui</div>
@@ -1455,7 +1466,34 @@ async function instalarPwa() {
   }
 }
 
-/* ---------------- Inicialização ---------------- */
+/* ---------------- Inicialização e Sincronização Dinâmica (iOS / Desktop) ---------------- */
+async function forcarAtualizacaoManual() {
+  toast('🔄 Sincronizando dados...');
+  fecharDiasPendentes();
+  await buscarClima(false);
+  if (!window.MQTT_CONNECTED && !window.MQTT_CONNECTING) {
+    iniciarMqttNuvem();
+  }
+  await sincronizarEsp32();
+  render();
+  toast('✅ Sistema 100% atualizado!');
+}
+
+function acordarApp() {
+  fecharDiasPendentes();
+  if (!window.MQTT_CONNECTED && !window.MQTT_CONNECTING) {
+    iniciarMqttNuvem();
+  }
+  sincronizarEsp32();
+  render();
+}
+
+window.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') acordarApp();
+});
+window.addEventListener('pageshow', acordarApp);
+window.addEventListener('focus', acordarApp);
+
 async function iniciar() {
   fecharDiasPendentes(); render();
   iniciarMqttNuvem(); // Inicia a conexão MQTT em tempo real via nuvem HiveMQ
@@ -1464,5 +1502,15 @@ async function iniciar() {
   await sincronizarEsp32(); render();
   setInterval(() => { fecharDiasPendentes(); render(); }, 30000);
   setInterval(sincronizarEsp32, 15000);
+
+  // Atualização frequente (1s) para contadores de rega ativa e relógio do painel
+  setInterval(() => {
+    const P = planos();
+    const ev = linhaDoTempo(P);
+    const agora = regandoAgora(ev);
+    if (agora) {
+      render();
+    }
+  }, 1000);
 }
 document.addEventListener('DOMContentLoaded', iniciar);

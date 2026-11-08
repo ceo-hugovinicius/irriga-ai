@@ -536,6 +536,11 @@ void executarComandoGeral(JsonDocument& doc) {
         fecharTodasValvulas();
         recalcularPlanoDoDia();
         beep(100, 3);
+    } else if (acao == "cancelar_chuva") {
+        float mm = doc["mm"] | 0.0f;
+        for (int i = 0; i < 2; i++) zones[i].Dr_mm += chuvaEfetiva(mm);
+        recalcularPlanoDoDia();
+        beep(60, 2);
     }
 }
 

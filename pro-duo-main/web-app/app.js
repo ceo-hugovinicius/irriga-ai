@@ -80,7 +80,8 @@ function carregar() {
 window.MQTT_CLIENT_ID = 'irriga-web-' + Math.random().toString(16).substring(2, 10);
 
 function salvarLocal() {
-  localStorage.setItem(KEY, JSON.stringify(S));
+  if (!S.ts) S.ts = Date.now();
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
 }
 
 let debounceCloudTimer = null;
@@ -93,18 +94,20 @@ function agendarSincronizacaoNuvem() {
 }
 
 function salvar() {
+  S.ts = Date.now();
   salvarLocal();
   agendarSincronizacaoNuvem();
 }
 window.addEventListener('storage', (e) => { if (e.key === KEY) { S = carregar(); render(); } });
 
 function salvarConfigCloud() {
+  if (!S.ts) S.ts = Date.now();
   salvarLocal();
   if (window.MQTT_CLIENT && window.MQTT_CONNECTED) {
     try {
       const cfgPayload = {
         senderId: window.MQTT_CLIENT_ID,
-        ts: Date.now(),
+        ts: S.ts,
         zones: S.zones.map((z) => ({
           id: z.id,
           nome: z.nome,
@@ -247,7 +250,11 @@ function linhaDoTempo(P) {
     ...P.pHoje.eventos.map((e) => ({ ...e, ts: absTs(t, e.inicioMin), te: absTs(t, e.fimMin) })),
     ...P.pAmanha.eventos.map((e) => ({ ...e, ts: absTs(am, e.inicioMin), te: absTs(am, e.fimMin) })),
   ];
-  if (S.manual && S.manual.fim > Date.now()) ev.push(...S.manual.eventos);
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  // Mantém os eventos manuais na linha do tempo se ainda estão no prazo ou se o SABIÁ está offline aguardando conexão
+  if (S.manual && (S.manual.fim > Date.now() || (!espOnline && Array.isArray(S.manual.eventos) && S.manual.eventos.length > 0))) {
+    ev.push(...S.manual.eventos);
+  }
   return ev.sort((a, b) => a.ts - b.ts);
 }
 
@@ -625,7 +632,11 @@ function iniciarMqttNuvem() {
   if (window.MQTT_CLIENT && (window.MQTT_CONNECTED || window.MQTT_CONNECTING)) return;
 
   if (!window.MQTT_CLIENT_ID) {
-    window.MQTT_CLIENT_ID = 'irriga-web-' + Math.random().toString(16).substring(2, 10);
+    try { window.MQTT_CLIENT_ID = sessionStorage.getItem('irriga_mqtt_client_id'); } catch (e) {}
+    if (!window.MQTT_CLIENT_ID) {
+      window.MQTT_CLIENT_ID = 'irriga-web-' + Math.random().toString(16).substring(2, 10);
+      try { sessionStorage.setItem('irriga_mqtt_client_id', window.MQTT_CLIENT_ID); } catch (e) {}
+    }
   }
   const client = new Paho.MQTT.Client('broker.hivemq.com', 8884, window.MQTT_CLIENT_ID);
   window.MQTT_CLIENT = client;
@@ -670,6 +681,11 @@ function iniciarMqttNuvem() {
           // Ignora o próprio eco enviado por esta aba
           return;
         }
+        // Blindagem contra ressurreição de dados antigos: ignora se a mensagem for anterior à edição local mais recente
+        if (data && typeof data.ts === 'number' && S.ts && data.ts < S.ts) {
+          console.warn('⚠️ [MQTT] Configuração da nuvem ignorada por ser mais antiga que a alteração local:', data.ts, 'vs local', S.ts);
+          return;
+        }
         console.log('🔄 [MQTT] Configuração compartilhada recebida da nuvem:', data);
         if (data && Array.isArray(data.zones)) {
           data.zones.forEach((remoteZ, idx) => {
@@ -695,6 +711,7 @@ function iniciarMqttNuvem() {
           if (data.hasOwnProperty('pause')) S.pause = data.pause || { until: null, indefinite: false, origem: null };
           if (data.hasOwnProperty('chuvaLocal')) S.chuvaLocal = data.chuvaLocal || {};
           if (Array.isArray(data.auditoria)) S.auditoria = data.auditoria;
+          S.ts = data.ts || Date.now();
           salvarLocal();
           render();
         }
@@ -1338,7 +1355,8 @@ function renderHero(P, agora, proxima, semana, usado, espias) {
 
 function renderQuatroBotoes(agora) {
   const p = pausado();
-  const manualAtivo = (agora && agora.manual) || (S.manual && S.manual.fim > Date.now());
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  const manualAtivo = (agora && agora.manual) || (S.manual && (S.manual.fim > Date.now() || (!espOnline && Array.isArray(S.manual.eventos) && S.manual.eventos.length > 0)));
   const bAtivo = S.boost.pct > 0 && Date.parse(S.boost.until) > Date.now();
   const chuvaHoje = S.chuvaLocal[hoje()] || 0;
 

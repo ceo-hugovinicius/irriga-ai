@@ -487,7 +487,7 @@ function abrirChuva() {
  * ========================================================================== */
 function salvarHidraulicaFita(i, campo, valor) {
   if (S.ui.locked) {
-    toast('🔒 Destrave o cadeado no topo para alterar as medidas.');
+    solicitarDestravamentoComPin(() => salvarHidraulicaFita(i, campo, valor));
     return;
   }
   const z = S.zones[i];
@@ -506,9 +506,12 @@ function salvarHidraulicaFita(i, campo, valor) {
   z.flow_cal_lpm = 0;
   const g = C.geometria(z, S.soil);
   audit('app', `📏 Zona ${z.id}: ${g.metros}m de fita · furos a ${g.espacamentoCm}cm · ${g.vazaoFuroLph} L/h → ${Math.round(g.vazaoLph)} L/h`, 'config');
-  salvar();
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal();
   render();
   abrirZona(i);
+  toast('📏 Medidas salvas e sincronizadas na nuvem!');
 }
 
 function abrirZona(i) {
@@ -715,6 +718,10 @@ function abrirPlantio(i, cropIdSel, dataSel, pedirConfirmacao = false) {
     : (C.CROPS[cid] || C.CROPS['feijao_verde']);
   const dt = dataSel || hoje();
   const prev = isNenhuma ? { ciclo: 0, colheita: dt, totalL: 0 } : C.previaSafra(z, S.soil, cid, dt);
+  const sug = (!isNenhuma && C.sugerirDataPlantio) ? C.sugerirDataPlantio(S, i, cid, dt) : null;
+  const opcaoAtual = sug ? (sug.opcoes.find((o) => o.plantio === dt) || sug.opcoes[0]) : null;
+  const choqueCota = opcaoAtual && !opcaoAtual.cabeNaCota;
+  const melhorData = sug ? sug.melhor : null;
 
   abrirModal(`
     <div class="row between" style="margin-bottom:4px">
@@ -770,6 +777,28 @@ function abrirPlantio(i, cropIdSel, dataSel, pedirConfirmacao = false) {
           <div class="li"><span>💧 Consumo total estimado</span><b>${fmtL(prev.totalL)}</b></div>
         </div>
       </div>
+
+      ${choqueCota ? `
+        <div class="alert warn" style="margin-top:10px;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;padding:12px;border-radius:10px">
+          <div class="t13 b" style="display:flex;align-items:center;gap:6px">
+            <span>⚠️ Alerta: Risco de Estourar Cota de Água</span>
+          </div>
+          <p class="t12" style="margin:4px 0 8px 0;line-height:1.4">
+            Plantando em <b>${fmtData(dt)}</b>, o consumo combinado das duas zonas atingirá pico de <b>${Math.round(opcaoAtual.picoCombinadoL)} L/dia</b>, superando a cota diária de <b>${S.quota.daily_L} L/dia</b>.
+          </p>
+          ${melhorData && melhorData.plantio !== dt ? `
+            <div style="background:#fff;padding:8px 10px;border-radius:6px;border:1px dashed #d97706;margin-top:6px">
+              <div class="t12" style="color:#78350f">
+                💡 <b>Data recomendada para evitar choque:</b><br/>
+                Plantando em <b>${fmtData(melhorData.plantio)}</b> (+${melhorData.offset} dias), o pico combinado cai para <b>${Math.round(melhorData.picoCombinadoL)} L/dia</b> ${melhorData.cabeNaCota ? '(cabe 100% na cota)' : '(mitigado)'}.
+              </div>
+              <button class="btn sm primary" style="margin-top:8px;width:100%" onclick="abrirPlantio(${i},'${cid}','${melhorData.plantio}',false)">
+                📅 Usar Data Recomendada (${fmtData(melhorData.plantio)})
+              </button>
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
     ` : ''}
 
     <!-- Passo de Dupla Confirmação Explícita ("Confirmar troca de cultura") -->

@@ -77,30 +77,57 @@ function carregar() {
   } catch (e) { /* estado novo */ }
   return novoEstado();
 }
-function salvar() { localStorage.setItem(KEY, JSON.stringify(S)); }
+window.MQTT_CLIENT_ID = 'irriga-web-' + Math.random().toString(16).substring(2, 10);
+
+function salvarLocal() {
+  localStorage.setItem(KEY, JSON.stringify(S));
+}
+
+let debounceCloudTimer = null;
+function agendarSincronizacaoNuvem() {
+  if (debounceCloudTimer) clearTimeout(debounceCloudTimer);
+  debounceCloudTimer = setTimeout(() => {
+    salvarConfigCloud();
+    sincronizarEsp32();
+  }, 120);
+}
+
+function salvar() {
+  salvarLocal();
+  agendarSincronizacaoNuvem();
+}
 window.addEventListener('storage', (e) => { if (e.key === KEY) { S = carregar(); render(); } });
 
 function salvarConfigCloud() {
-  salvar();
+  salvarLocal();
   if (window.MQTT_CLIENT && window.MQTT_CONNECTED) {
     try {
       const cfgPayload = {
+        senderId: window.MQTT_CLIENT_ID,
         ts: Date.now(),
         zones: S.zones.map((z) => ({
           id: z.id,
           nome: z.nome,
-          crop: z.crop,
+          crop: z.crop ? {
+            id: z.crop.id,
+            plantio: z.crop.plantio,
+            anterior: z.crop.anterior || null,
+          } : null,
           tape_meters: z.tape_meters,
           emitter_spacing_cm: z.emitter_spacing_cm,
           emitter_flow_lph: z.emitter_flow_lph,
-          mulch: z.mulch,
-          fine_pct: z.fine_pct,
-          restricao_modo: z.restricao_modo,
+          mulch: !!z.mulch,
+          fine_pct: z.fine_pct || 0,
+          restricao_modo: z.restricao_modo || 'auto',
         })),
         quota: S.quota,
         soil: S.soil,
         site: S.site,
         security: S.security,
+        manual: S.manual,
+        boost: S.boost,
+        pause: S.pause,
+        chuvaLocal: S.chuvaLocal,
       };
       const msg = new Paho.MQTT.Message(JSON.stringify(cfgPayload));
       msg.destinationName = MQTT_TOPIC_CONFIG;
@@ -246,6 +273,10 @@ function pausar(horas, origem = 'app') {
   if (S.manual) S.manual.fim = Date.now();
   audit(origem, horas ? `⏸️ Pausou regas por ${horas} h` : '⏸️ Pausou regas sem prazo', 'pausa', { horas });
   enviarComando({ acao: 'pausar', horas: horas || 0 });
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal();
+  render();
 }
 
 function retomar(origem = 'app', silencioso) {
@@ -253,6 +284,10 @@ function retomar(origem = 'app', silencioso) {
   S.pause = { until: null, indefinite: false, origem: null };
   if (!silencioso) audit(origem, '▶️ Retomou o piloto automático', 'retomar');
   enviarComando({ acao: 'retomar' });
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal();
+  render();
 }
 const pausado = () => S.pause.indefinite || (S.pause.until && Date.parse(S.pause.until) > Date.now());
 
@@ -323,6 +358,8 @@ function acionarOverrideRega({ zonasIdx = [0, 1], minutosPorZona = null, litrosP
     origem,
     zonas: novosEventos.map((e) => ({ zona: e.zona, minutos: Math.round(e.minutos), litros: Math.round(e.litros) })),
   });
+  salvarConfigCloud();
+  sincronizarEsp32();
   return { addLitros, addMin, eventos: novosEventos };
 }
 
@@ -360,7 +397,9 @@ function cancelarRegaManual(ev) {
   }
   S.auditoria = S.auditoria.filter((a) => a.tipo !== 'regar_agora');
   enviarComando({ acao: 'parar_rega' });
-  salvar(); render();
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal(); render();
   toast('✕ Rega manual cancelada e válvulas fechadas!');
 }
 
@@ -379,7 +418,9 @@ function removerDaFila(zonaId) {
     if (!S.manual.eventos.length) S.manual = null;
   }
   enviarComando({ acao: 'remover_fila', zona: zonaId });
-  salvar(); render();
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal(); render();
   toast(`✕ Zona ${zonaId} removida da fila de rega!`);
 }
 
@@ -388,6 +429,9 @@ function cancelarBoost(ev) {
   S.boost = { pct: 0, until: null };
   S.auditoria = S.auditoria.filter((a) => a.tipo !== 'boost');
   enviarComando({ acao: 'boost', pct: 0 });
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal(); render();
   toast('✕ Reforço "Era bom chover" cancelado!');
 }
 
@@ -398,6 +442,9 @@ function choveuAqui(mm, origem = 'app') {
   S.zones.forEach((z) => { z.Dr_mm = Math.max(0, (z.Dr_mm || 0) - ef); });
   audit(origem, `☔ Choveu aqui: +${mm} mm registrados`, 'chuva', { date: t, mm, ef });
   enviarComando({ acao: 'chuva_local', mm });
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal(); render();
 }
 
 function cancelarChuvaHoje(ev) {
@@ -410,7 +457,9 @@ function cancelarChuvaHoje(ev) {
     delete S.chuvaLocal[t];
   }
   S.auditoria = S.auditoria.filter((a) => !(a.tipo === 'chuva' && a.meta?.date === t));
-  salvar(); render();
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal(); render();
   toast('✕ Registro de chuva de hoje desfeito!');
 }
 
@@ -424,7 +473,9 @@ function mudarModoRestricao(zoneIdx, novoModo) {
     corte_total_hoje: 'Corte Total Hoje (0 L)',
   };
   audit('app', `🍯 Zona ${S.zones[zoneIdx].id}: restrição hídrica em modo "${nomes[novoModo] || novoModo}"`);
-  salvar();
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal();
   render();
   toast(`🍯 Restrição da Zona ${S.zones[zoneIdx].id}: ${nomes[novoModo]}`);
 }
@@ -488,8 +539,10 @@ function iniciarMqttNuvem() {
   }
   if (window.MQTT_CLIENT && (window.MQTT_CONNECTED || window.MQTT_CONNECTING)) return;
 
-  const clientId = 'irriga-web-' + Math.random().toString(16).substring(2, 10);
-  const client = new Paho.MQTT.Client('broker.hivemq.com', 8884, clientId);
+  if (!window.MQTT_CLIENT_ID) {
+    window.MQTT_CLIENT_ID = 'irriga-web-' + Math.random().toString(16).substring(2, 10);
+  }
+  const client = new Paho.MQTT.Client('broker.hivemq.com', 8884, window.MQTT_CLIENT_ID);
   window.MQTT_CLIENT = client;
   window.MQTT_CONNECTING = true;
 
@@ -514,9 +567,13 @@ function iniciarMqttNuvem() {
         S.device = { ...S.device, online: true, lastSeen: Date.now(), status: data, telemetry: data };
         if (typeof data.tank_L === 'number') S.tank.level_L = data.tank_L;
         if (typeof data.filter_pct === 'number') S.filtro.pct = data.filter_pct;
-        salvar();
+        salvarLocal();
         render();
       } else if (message.destinationName === MQTT_TOPIC_CONFIG) {
+        if (data && data.senderId && data.senderId === window.MQTT_CLIENT_ID) {
+          // Ignora o próprio eco enviado por esta aba
+          return;
+        }
         console.log('🔄 [MQTT] Configuração compartilhada recebida da nuvem:', data);
         if (data && Array.isArray(data.zones)) {
           data.zones.forEach((remoteZ, idx) => {
@@ -534,7 +591,11 @@ function iniciarMqttNuvem() {
           if (data.soil) S.soil = data.soil;
           if (data.site) S.site = { ...S.site, ...data.site };
           if (data.security) S.security = { ...S.security, ...data.security };
-          localStorage.setItem(KEY, JSON.stringify(S));
+          if (data.hasOwnProperty('manual')) S.manual = data.manual;
+          if (data.boost) S.boost = { ...S.boost, ...data.boost };
+          if (data.pause) S.pause = { ...S.pause, ...data.pause };
+          if (data.chuvaLocal) S.chuvaLocal = { ...S.chuvaLocal, ...data.chuvaLocal };
+          salvarLocal();
           render();
         }
       }

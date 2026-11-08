@@ -546,6 +546,18 @@ void configurarRotasHttp() {
     WiFi.softAP("Irriga-AI", "12345678");
     WiFi.begin("Wokwi-GUEST", "", 6);
 
+    Serial.print("🌐 [WiFi] Conectando a rede Wokwi-GUEST");
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - t0 < 4000)) {
+        delay(200);
+        Serial.print(".");
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf(" OK! (IP: %s)\n", WiFi.localIP().toString().c_str());
+    } else {
+        Serial.println(" (Conectando em background...)");
+    }
+
     server.enableCORS(true);
 
     server.on("/api/status", HTTP_GET, []() {
@@ -652,7 +664,7 @@ void gerenciarMqtt() {
     uint32_t now = millis();
     if (WiFi.status() == WL_CONNECTED) {
         if (!mqttClient.connected()) {
-            if (now - lastMqttReconnectMs > 5000) {
+            if (lastMqttReconnectMs == 0 || (now - lastMqttReconnectMs > 5000)) {
                 lastMqttReconnectMs = now;
                 String clientId = "ESP32-Irriga-" + String((uint32_t)ESP.getEfuseMac(), HEX);
                 Serial.print("☁️ [MQTT] Conectando ao broker HiveMQ... ");
@@ -663,7 +675,7 @@ void gerenciarMqtt() {
                     publicarStatusMqtt();
                     beep(50, 1);
                 } else {
-                    Serial.printf("Aguardando conexao (rc=%d)\n", mqttClient.state());
+                    Serial.printf("Falha (rc=%d). Nova tentativa em 5s...\n", mqttClient.state());
                 }
             }
         } else {
@@ -731,6 +743,7 @@ void setup() {
     mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
     mqttClient.setCallback(onMqttMessage);
     mqttClient.setBufferSize(2048);
+    gerenciarMqtt();
 
     Serial.println("🔔 [3/3] Inicializando buzzer e interface...");
     lastInteraction = millis();

@@ -84,14 +84,20 @@ async function enviarMensagemGrupo(texto) {
       postData = JSON.stringify({ phone: config.groupId, message: texto });
       if (config.apiKey) headers['Client-Token'] = config.apiKey;
     } else {
-      // Evolution API / Genérico: POST { number: groupId, text: texto }
+      // Evolution API / Green API / Z-API / Genérico
       postData = JSON.stringify({
+        chatId: config.groupId,
         number: config.groupId,
+        phone: config.groupId,
+        recipient: config.groupId,
         text: texto,
         message: texto,
         sender: 'SABIÁ Irriga.ai',
       });
-      if (config.apiKey) headers['apikey'] = config.apiKey;
+      if (config.apiKey) {
+        headers['apikey'] = config.apiKey;
+        headers['Client-Token'] = config.apiKey;
+      }
     }
 
     return await httpPost(url, postData, headers);
@@ -231,13 +237,33 @@ function processarTelemetriaSabia(data) {
   }
 }
 
-console.log('🤖 [SABIÁ WhatsApp Bot] Serviço iniciado com sucesso.');
-console.log(`⏱️ Boletim Matinal programado para as ${config.envioManhaHora}:00.`);
-console.log(`⏱️ Fechamento do Entardecer programado para as ${config.envioTardeHora}:00.`);
-console.log('🛡️ Monitoramento de emergências ativo (Cano Seco, Caixa < 20% e Offline > 24h).');
+// Trata execução pontual por linha de comando (CLI ou GitHub Action)
+const args = process.argv.slice(2);
+if (args.includes('--teste')) {
+  console.log('🔔 [SABIÁ] Disparando mensagem de teste pontual para o grupo...');
+  const msgTeste = `🔔 *TESTE OPERACIONAL DO SABIÁ* 🦅\n📍 *${estadoAtual.site?.nome || 'Sítio'}*\n\nConexão com o grupo da família realizada com sucesso! O robô enviará os boletins diários da roça às 06:00 e 18:00.`;
+  enviarMensagemGrupo(msgTeste).then(() => process.exit(0));
+} else if (args.includes('--manha')) {
+  console.log('☀️ [SABIÁ] Gerando e enviando Boletim Matinal pontual...');
+  const hoje = Core.isoDate(new Date());
+  const P = Core.planejarDia(estadoAtual, [], hoje);
+  const msg = Notif.gerarResumoManha(estadoAtual, { pHoje: P }, hoje);
+  enviarMensagemGrupo(msg).then(() => process.exit(0));
+} else if (args.includes('--tarde')) {
+  console.log('🌙 [SABIÁ] Gerando e enviando Fechamento do Entardecer pontual...');
+  const hoje = Core.isoDate(new Date());
+  const P = Core.planejarDia(estadoAtual, [], hoje);
+  const msg = Notif.gerarResumoTarde(estadoAtual, { pHoje: P }, hoje);
+  enviarMensagemGrupo(msg).then(() => process.exit(0));
+} else {
+  console.log('🤖 [SABIÁ WhatsApp Bot] Serviço contínuo iniciado com sucesso.');
+  console.log(`⏱️ Boletim Matinal programado para as ${config.envioManhaHora}:00.`);
+  console.log(`⏱️ Fechamento do Entardecer programado para as ${config.envioTardeHora}:00.`);
+  console.log('🛡️ Monitoramento de emergências ativo (Cano Seco, Caixa < 20% e Offline > 24h).');
 
-// Inicia verificação a cada 30 segundos
-setInterval(verificarAgendamentoDiario, 30000);
+  // Inicia verificação periódica a cada 30 segundos no modo daemon
+  setInterval(verificarAgendamentoDiario, 30000);
+}
 
 // Exporta funções para uso embutido ou teste
 module.exports = {

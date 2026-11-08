@@ -642,8 +642,10 @@ async function dispararWebhookWhatsApp(texto, tipo = 'geral') {
       return await fetch(getUrl).then((r) => r.ok).catch(() => false);
     } else {
       const payload = JSON.stringify({
+        chatId: S.site?.whatsapp_destino || '',
         number: S.site?.whatsapp_destino || '',
         phone: S.site?.whatsapp_destino || '',
+        recipient: S.site?.whatsapp_destino || '',
         text: texto,
         message: texto,
         sender: 'SABIÁ Irriga.ai',

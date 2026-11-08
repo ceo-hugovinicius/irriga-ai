@@ -1346,17 +1346,21 @@ function abrirModalWhatsApp(aba = 'robo', subtipoAlerta = 'tubo_seco') {
 
         <div class="field">
           <label>URL do Webhook / Gateway do WhatsApp</label>
-          <input id="zap-webhook-url" type="url" placeholder="Ex: https://api.callmebot.com/whatsapp.php ou https://sua-evolution-api.com/..." value="${esc(S.site?.webhook_whatsapp || '')}" />
+          <input id="zap-webhook-url" type="url" placeholder="Ex: https://api.green-api.com/waInstance.../sendMessage/... ou Webhook" value="${esc(S.site?.webhook_whatsapp || '')}" />
         </div>
 
         <div class="field" style="margin-top:10px">
-          <label>ID do Grupo do WhatsApp (ou número)</label>
-          <input id="zap-dest-number" type="text" placeholder="Ex: 1203630XXXXX@g.us ou 5583999998888" value="${esc(S.site?.whatsapp_destino || '')}" />
+          <label>ID do Grupo do WhatsApp (chatId @g.us)</label>
+          <input id="zap-dest-number" type="text" placeholder="Ex: 120363040377656518@g.us" value="${esc(S.site?.whatsapp_destino || '')}" />
         </div>
 
         <div class="field" style="margin-top:10px">
           <label>Chave de API / Token do Gateway (opcional)</label>
-          <input id="zap-api-key" type="password" placeholder="Token ou apiKey do serviço" value="${esc(S.site?.whatsapp_api_key || '')}" />
+          <input id="zap-api-key" type="password" placeholder="Token ou apiKey do serviço (se não estiver na URL)" value="${esc(S.site?.whatsapp_api_key || '')}" />
+        </div>
+
+        <div class="locked-note" style="margin-top:12px;font-size:12px;background:var(--blue-bg);color:var(--blue);border-color:var(--blue-bd)">
+          💡 <b>Sem servidor ou Raspberry Pi?</b> É possível usar o plano gratuito da nuvem (ex: <b>GREEN-API</b>). Você cria o grupo no WhatsApp, conecta a conta gratuita lendo um QR Code, e o robô passa a enviar para o grupo 24h sem custo!
         </div>
 
         <div class="list" style="margin-top:14px">

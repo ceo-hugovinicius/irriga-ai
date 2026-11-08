@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Irriga.ai · Bancada de Engenharia (Dev-GUI v1.5.2-Argon)</title>
+  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+  <style>
+    :root {
+      --bg: #0B120E; --card: #131C17; --line: #24312A; --sub: #18231D;
+      --ink: #F2F7F3; --ink2: #C9D6CE; --mute: #8FA197;
+      --green: #4ADE9B; --blue: #5AB4F5; --amber: #F5B84A; --red: #F98C82; --violet: #B4A2FF;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; padding: 16px; }
+    .wrap { max-width: 1240px; margin: 0 auto; }
+    header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; }
+    h1 { font-size: 20px; margin: 0; }
+    h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); margin: 0 0 12px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 13px; border-radius: 11px; border: 1px solid var(--line); background: var(--sub); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+    .btn.green { background: #12301F; border-color: #1E5436; color: var(--green); }
+    .btn.blue { background: #0F2638; border-color: #1D496B; color: var(--blue); }
+    .btn.amber { background: #33260B; border-color: #614714; color: var(--amber); }
+    .field { margin-bottom: 12px; }
+    .field label { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink2); margin-bottom: 4px; font-weight: 600; }
+    input[type="range"] { width: 100%; accent-color: var(--green); }
+    .oled { background: #000; border: 2px solid #334155; border-radius: 12px; padding: 12px; font: 12.5px/1.45 "Consolas", "Courier New", monospace; color: #38BDF8; box-shadow: inset 0 0 12px rgba(56,189,248,.15); }
+    .oled .top-line { color: #FACC15; font-weight: 700; border-bottom: 1px dashed #334155; padding-bottom: 4px; margin-bottom: 6px; }
+    .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>🛠️ Irriga.ai Pro-Duo · Bancada Dev-GUI (v1.5.2-Argon)</h1>
+        <div style="color:var(--mute);font-size:13px">Sincronizada em tempo real com <code>index.html</code> via <code>localStorage</code> · Motor 2 Turnos + Fita por Metro</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <a class="btn green" href="./index.html">👤 Abrir App Usuário Final</a>
+        <button class="btn" onclick="resetarPadrao()">♻️ Resetar Estado</button>
+      </div>
+    </header>
+
+    <div class="presets">
+      <button class="btn amber" onclick="aplicarPreset('sede_4_espias')">🚨 Testar Sede + 4 Luzes-Espia (Pedido > Cota)</button>
+      <button class="btn blue" onclick="aplicarPreset('melancia_ameno')">🍉 Melancia Reta Final + Clima Ameno (Corte Forte Automático)</button>
+      <button class="btn" onclick="aplicarPreset('filtro_sujo')">🧽 Simular Filtro 120 Mesh Sujo (68%) + Caixa 35%</button>
+      <button class="btn" onclick="aplicarPreset('dia_chuvoso')">🌧️ Simular Chuva no Seridó (22 mm)</button>
+    </div>
+
+    <div class="grid" id="dev-root"></div>
+  </div>
+
+  <script src="../core/crops.js"></script>
+  <script src="../core/irriga-core.js"></script>
+  <script>
+    const C = window.IrrigaCore;
+    const KEY = 'irriga_argon_v1_5_2';
+    let oledPage = 0;
+
+    function lerEstado() {
+      try {
+        const raw = localStorage.getItem(KEY) || localStorage.getItem('irriga_argon_v1_5');
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      const s = C.estadoPadrao();
+      const t = C.isoDate(new Date());
+      s.zones[0].crop = { id: 'maxixe', plantio: C.addDays(t, -34), anterior: 'Leguminosas' };
+      s.zones[1].crop = { id: 'melancia', plantio: C.addDays(t, -67), anterior: 'Convolvuláceas' };
+      s.weather = { fetched: Date.now(), days: [] };
+      s.filtro = { pct: 96 };
+      s.chuvaLocal = {};
+      s.auditoria = [];
+      return s;
+    }
+    let S = lerEstado();
+
+    function garantirClimaHoje() {
+      const t = C.isoDate(new Date());
+      if (!S.weather) S.weather = { fetched: Date.now(), days: [] };
+      if (!Array.isArray(S.weather.days)) S.weather.days = [];
+      let w = S.weather.days.find((x) => x.date === t);
+      if (!w) {
+        const cl = C.climatologia(t);
+        w = { date: t, et0: cl.et0, tmax: 34.0, tmin: 22, wind: 22, rain: 0, rain_prob: 10 };
+        S.weather.days.unshift(w);
+      }
+      S.weather.fetched = Date.now();
+      return w;
+    }
+
+    function salvarERender() {
+      localStorage.setItem(KEY, JSON.stringify(S));
+      renderDev();
+    }
+
+    function resetarPadrao() {
+      localStorage.removeItem(KEY);
+      S = lerEstado();
+      salvarERender();
+    }
+
+    function apertarBotaoB2Flex() {
+      const t = C.isoDate(new Date());
+      const v0 = C.vazaoZona(S.zones[0], S.soil);
+      const v1 = C.vazaoZona(S.zones[1], S.soil);
+      const addL = 30 * v0 + 30 * v1;
+      const agora = Date.now();
+      S.manual = {
+        dia: t,
+        litrosTotal: ((S.manual && S.manual.dia === t) ? (S.manual.litrosTotal || 0) : 0) + addL,
+        fim: agora + 60 * 60000,
+        eventos: [
+          { zona: 1, litros: 30 * v0, minutos: 30, ts: agora, te: agora + 30 * 60000, manual: true },
+          { zona: 2, litros: 30 * v1, minutos: 30, ts: agora + 31 * 60000, te: agora + 61 * 60000, manual: true },
+        ],
+      };
+      S.tank.level_L = Math.max(0, (S.tank.level_L || 3750) - addL);
+      if (!Array.isArray(S.auditoria)) S.auditoria = [];
+      S.auditoria.unshift({
+        id: 'ev_' + Date.now(),
+        ts: Date.now(),
+        origem: 'fisico',
+        tipo: 'regar_agora',
+        texto: `🔥 Botão B2 (+1h Flex): 30 min Z1 (${Math.round(30 * v0)} L) + 30 min Z2 (${Math.round(30 * v1)} L)`,
+        meta: { litrosTotal: addL, minutosTotal: 60 },
+      });
+      salvarERender();
+    }
+
+    function aplicarPreset(nome) {
+      const t = C.isoDate(new Date());
+      const w = garantirClimaHoje();
+      if (nome === 'sede_4_espias') {
+        w.tmax = 35.5;
+        w.wind = 25.0;
+        w.et0 = 6.8;
+        w.rain = 0; w.rain_prob = 5;
+        S.quota.daily_L = 550; // Força pedido > cota para testar indicador de sede!
+      } else if (nome === 'melancia_ameno') {
+        S.zones[1].crop = { id: 'melancia', plantio: C.addDays(t, -68), anterior: 'Convolvuláceas' };
+        S.zones[1].restricao_modo = 'auto';
+        w.tmax = 29.0; // Clima ameno (< 30,5°C)
+        w.rain = 4;
+        w.rain_prob = 65; // Chance de chuva >= 50%
+        S.quota.daily_L = 1000;
+      } else if (nome === 'filtro_sujo') {
+        S.filtro = { pct: 68 };
+        S.tank.level_L = 1750;
+      } else if (nome === 'dia_chuvoso') {
+        w.tmax = 28.0;
+        w.wind = 12;
+        w.et0 = 3.8;
+        w.rain = 22;
+        w.rain_prob = 90;
+        if (!S.chuvaLocal) S.chuvaLocal = {};
+        S.chuvaLocal[t] = 22;
+      }
+      salvarERender();
+    }
+
+    function renderDev() {
+      const t = C.isoDate(new Date());
+      const w = garantirClimaHoje();
+      const chuvaHoje = (S.chuvaLocal && S.chuvaLocal[t]) || 0;
+      const p = C.planejarDia(S, S.weather.days, t, chuvaHoje);
+      const g0 = C.geometria(S.zones[0], S.soil);
+      const g1 = C.geometria(S.zones[1], S.soil);
+
+      let oledLines = [];
+      if (oledPage === 0) {
+        oledLines = [
+          `IRRIGA.AI v1.5.2-ARGON [P1]`,
+          `Status: ${S.pause?.indefinite || (S.pause?.until && Date.parse(S.pause.until) > Date.now()) ? 'PAUSADO' : '2 TURNOS (04h/16h)'}`,
+          `Pedido Real: ${Math.round(p.pedidoRealL)} L`,
+          `Liberado/Cota: ${Math.round(p.totalL)} / ${S.quota.daily_L} L`,
+          `Sede: ${p.passandoSede ? 'FALTAM ' + Math.round(p.deficitSedeL) + ' L!' : '0 L (100% OK)'}`,
+          `Caixa: ${Math.round(S.tank.level_L)}L | Filtro:${Math.round(S.filtro?.pct ?? 100)}%`
+        ];
+      } else {
+        oledLines = [
+          `FITA & 2 TURNOS        [P2]`,
+          `Z1 (${g0.metros}m): ${Math.round(p.porZona[0].vazaoLph)} L/h`,
+          ` -> M:${Math.round(p.porZona[0].litrosManha)}L | T:${Math.round(p.porZona[0].litrosTarde)}L`,
+          `Z2 (${g1.metros}m): ${Math.round(p.porZona[1].vazaoLph)} L/h`,
+          ` -> M:${Math.round(p.porZona[1].litrosManha)}L | T:${Math.round(p.porZona[1].litrosTarde)}L`,
+          `Restricao Z2: ${p.porZona[1].restricaoInfo ? '-' + p.porZona[1].restricaoInfo.cortePct + '%' : 'Normal'}`
+        ];
+      }
+
+      document.getElementById('dev-root').innerHTML = `
+        <div class="card">
+          <h2>🌡️ Simulador Climático de Hoje (${t})</h2>
+          <div class="field">
+            <label><span>Temperatura Máxima</span><b>${w.tmax.toFixed(1)} °C</b></label>
+            <input type="range" min="25" max="40" step="0.5" value="${w.tmax}" oninput="garantirClimaHoje().tmax=Number(this.value);salvarERender()" />
+          </div>
+          <div class="field">
+            <label><span>Vento Seco</span><b>${w.wind.toFixed(0)} km/h</b></label>
+            <input type="range" min="5" max="40" step="1" value="${w.wind}" oninput="garantirClimaHoje().wind=Number(this.value);salvarERender()" />
+          </div>
+          <div class="field">
+            <label><span>Evapotranspiração (ET₀)</span><b>${w.et0.toFixed(1)} mm/dia</b></label>
+            <input type="range" min="2.5" max="8.0" step="0.1" value="${w.et0}" oninput="garantirClimaHoje().et0=Number(this.value);salvarERender()" />
+          </div>
+          <div class="field">
+            <label><span>Chuva Prevista Hoje</span><b>${(w.rain || 0).toFixed(0)} mm (${w.rain_prob || 0}%)</b></label>
+            <input type="range" min="0" max="40" step="2" value="${w.rain || 0}" oninput="const x=garantirClimaHoje();x.rain=Number(this.value);x.rain_prob=x.rain>0?75:10;salvarERender()" />
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>📏 Metragem de Fita, Cota Diária e Caixa 5.000 L</h2>
+          <div class="field">
+            <label><span>Cota Diária Máxima</span><b>${S.quota.daily_L} L/dia (Pedido: ${Math.round(p.pedidoRealL)} L)</b></label>
+            <input type="range" min="250" max="2000" step="50" value="${S.quota.daily_L}" oninput="S.quota.daily_L=Number(this.value);salvarERender()" />
+          </div>
+          <div class="field">
+            <label><span>Fita Zona 1 (${g0.espacamentoCm}cm · ${g0.vazaoFuroLph} L/h)</span><b>${g0.metros} m → ${Math.round(g0.vazaoLph)} L/h</b></label>
+            <input type="range" min="40" max="300" step="10" value="${g0.metros}" oninput="S.zones[0].tape_meters=Number(this.value);S.zones[0].flow_cal_lpm=0;salvarERender()" />
+          </div>
+          <div class="field">
+            <label><span>Fita Zona 2 (${g1.espacamentoCm}cm · ${g1.vazaoFuroLph} L/h)</span><b>${g1.metros} m → ${Math.round(g1.vazaoLph)} L/h</b></label>
+            <input type="range" min="40" max="300" step="10" value="${g1.metros}" oninput="S.zones[1].tape_meters=Number(this.value);S.zones[1].flow_cal_lpm=0;salvarERender()" />
+          </div>
+          <div class="field">
+            <label><span>Nível da Caixa 5.000 L</span><b>${Math.round(S.tank.level_L)} L (${Math.round(100 * S.tank.level_L / S.tank.capacity)}%)</b></label>
+            <input type="range" min="500" max="5000" step="100" value="${S.tank.level_L}" oninput="S.tank.level_L=Number(this.value);salvarERender()" />
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <h2 style="margin:0">🖥️ Visor OLED 0.96" SSD1306 + Botões Físicos</h2>
+            <button class="btn" style="padding:4px 8px;font-size:12px" onclick="oledPage=(oledPage+1)%2;renderDev()">Tela ${oledPage + 1}/2</button>
+          </div>
+          <div class="oled">
+            <div class="top-line">${oledLines[0]}</div>
+            ${oledLines.slice(1).map((l) => `<div>${l}</div>`).join('')}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+            <button class="btn" onclick="S.pause={until:new Date(Date.now()+7200e3).toISOString(),indefinite:false,origem:'fisico'};salvarERender()">B1 (GPIO 13): ⏯️ Pausa 2h</button>
+            <button class="btn blue" onclick="apertarBotaoB2Flex()">B2 (GPIO 14): 🔥 +1h Flex (30m+30m)</button>
+            <button class="btn" onclick="S.boost={pct:25,until:new Date(Date.now()+86400e3).toISOString()};salvarERender()">B3 (GPIO 26): 🌧️ +25% 24h</button>
+            <button class="btn" onclick="if(!S.chuvaLocal)S.chuvaLocal={};S.chuvaLocal[C.isoDate(new Date())]=15;salvarERender()">B4 (GPIO 27): ☔ Choveu 15mm</button>
+          </div>
+        </div>
+      `;
+    }
+    renderDev();
+  </script>
+</body>
+</html>

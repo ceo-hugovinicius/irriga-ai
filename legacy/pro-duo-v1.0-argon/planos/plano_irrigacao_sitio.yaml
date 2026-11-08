@@ -1,0 +1,335 @@
+# ==============================================================================
+# 🌱 IRRIGA.AI PRO-DUO — ARQUIVO PADRONIZADO DE PLANO DE IRRIGAÇÃO (IrrigaPlan v1.0)
+# ==============================================================================
+# 🤖 BRIEFING OFICIAL E DIRETRIZES DE PERITO PARA O CLAUDE (LEIA COM ATENÇÃO):
+#
+# Olá, Claude! Você está recebendo o arquivo oficial de configuração e telemetria
+# em tempo real do sistema automatizado de irrigação por gotejamento "Irriga.ai Pro-Duo",
+# instalado em São Vicente do Seridó - PB (Semiárido Paraibano, Clima BSh).
+#
+# ⚠️ ALERTA IMPORTANTE SOBRE O PRÓXIMO PROMPT DO USUÁRIO:
+# Nesta conversa (ou logo na mensagem seguinte a este arquivo), o usuário vai:
+#   1) Relatar algo que está acontecendo no plantio (ex: sintomas nas folhas, flores
+#      caindo, frutos rachando, solo encharcado/seco, filtro sujando, cota estourando)
+#      e pedir um DIAGNÓSTICO AGRONÔMICO + AJUSTE; OU
+#   2) Solicitar uma MODIFICAÇÃO no plano de irrigação (ex: troca de cultura, mudança
+#      de horários, economia de água na caixa de 5.000 L, ativação de novo relé).
+#
+# 🎓 COMO VOCÊ DEVE AGIR (MODO PERITO AGRÔNOMO + ENGENHEIRO DO SISTEMA):
+#   1. Atue como Engenheiro Agrônomo Sênior especialista em Irrigação por Gotejamento
+#      no Semiárido Nordestino (Manejo FAO-56, Evapotranspiração ET0, Fator Kc e Rotação).
+#   2. Analise a seção 'diagnostico_tempo_real_hoje' e o 'estado_fenologico_ativo_hoje'
+#      de cada zona antes de responder.
+#   3. Se o usuário pedir diagnóstico ou alteração, primeiro explique de forma clara,
+#      humana e objetiva o seu diagnóstico técnico e o porquê das mudanças sugeridas.
+#   4. Em seguida, ENTREGUE O ARQUIVO YAML COMPLETO ATUALIZADO dentro de um bloco de
+#      código ```yaml ... ``` (ou como arquivo .yaml para download) pronto para o
+#      usuário colar ou enviar de volta no aplicativo Irriga.ai Pro-Duo.
+#
+# 🛡️ DIRETRIZES TÉCNICAS E TRAVAS DE SEGURANÇA (OBRIGATÓRIAS AO GERAR NOVO YAML):
+#   - Mantenha a estrutura e os nomes exatos das chaves (keys) deste arquivo YAML.
+#   - 1 mm de lâmina de água = 1 Litro por metro quadrado (L/m²).
+#   - NUNCA agende o mesmo 'horario_inicio' nas duas zonas ao mesmo tempo (o sistema usa
+#     um filtro único 120 Mesh por gravidade; irrigue uma zona após a outra com 30-45 min
+#     de diferença para manter a pressão alta nos gotejadores).
+#   - Respeite a capacidade da caixa (5.000 L) e a 'cota_diaria_maxima_litros' (padrão 1.000 L/dia).
+#   - Mantenha os pinos GPIO do ESP32-WROOM-32D (38 pinos) intactos:
+#     Relé 1 (Válvula Mestre = GPIO 4), Relé 2 (Zona 1 = GPIO 16), Relé 3 (Zona 2 = GPIO 17),
+#     Relés 4 a 8 (Expansão = GPIOs 18, 19, 23, 25, 5).
+#   - Evite repetir a mesma 'familia_botanica' seguida na mesma zona (priorize rotação
+#     Cucurbitáceas -> Leguminosas -> Convolvuláceas/Poáceas).
+# ==============================================================================
+
+versao_padrao: "1.0"
+sistema: "Irriga.ai Pro-Duo"
+ultima_atualizacao: "2026-11-07"
+autor_ultima_edicao: "Configuração Inicial Pro-Duo"
+
+# ------------------------------------------------------------------------------
+# 0. INSTRUÇÕES ESTRUTURADAS PARA O PERITO IA (CLAUDE)
+# ------------------------------------------------------------------------------
+instrucoes_perito_ia_claude:
+  papel_da_ia: "Engenheiro Agrônomo Sênior (Semiárido / FAO-56) e Arquiteto do Sistema Irriga.ai Pro-Duo"
+  alerta_proximo_prompt: "Atenção Claude: No prompt junto a este arquivo (ou no próximo), o usuário pedirá um diagnóstico do plantio ou modificações neste plano. Analise os dados atuais com rigor técnico e devolva o código YAML completo e válido."
+  regras_ouro_geracao_yaml:
+    - "Sempre devolver o YAML completo (todas as seções de 0 a 6) sem omitir blocos com '...' para que o app possa importar diretamente."
+    - "Nunca sobrepor horários de início da Zona 1 e Zona 2 (filtro único MESH 120 opera melhor com 1 zona por vez)."
+    - "Manter a soma de 'proporcao_do_dia_pct' dos turnos_diarios de cada zona igual a 100%."
+    - "Preservar os números de GPIO originais do hardware ESP32."
+
+# ------------------------------------------------------------------------------
+# 1. LOCALIZAÇÃO E FONTE DE PREVISÃO DO TEMPO (São Vicente do Seridó - PB)
+# ------------------------------------------------------------------------------
+localizacao_sitio:
+  nome: "Sítio — São Vicente do Seridó (PB)"
+  latitude: -6.95325       # 6°57'11.7"S
+  longitude: -36.36853     # 36°22'06.7"W
+  fuso_horario: "America/Fortaleza"
+  provedor_clima: "open-meteo"
+
+# ------------------------------------------------------------------------------
+# 2. COTAS DE USO DE ÁGUA, FILTRO ÚNICO (120 MESH) E SEGURANÇA DA CAIXA (5.000 L)
+# ------------------------------------------------------------------------------
+cotas_e_seguranca:
+  capacidade_caixa_litros: 5000
+  cota_diaria_maxima_litros: 1000         # Sensor de vazão SF1 corta se atingir este teto no dia
+  cota_semanal_maxima_litros: 7000        # Teto opcional acumulado de 7 dias
+  nivel_minimo_seguranca_caixa_pct: 25    # Abaixo de 25% (Boia 1), bloqueia irrigações
+  modo_rateio_quando_atingir_cota: "PRIORIZAR_FASE_CRITICA" # Ou "PROPORCIONAL_IGUAL"
+  tempo_maximo_valvula_aberta_min: 180    # Segurança contra esquecimento ou falha de sensor
+  filtro_unico_120_mesh:
+    alerta_limpeza_abaixo_de_pct: 80      # Avisa no celular se a vazão cair abaixo de 80% do normal
+    parada_emergencia_abaixo_de_pct: 50   # Fecha tudo se cair abaixo de 50% (entupimento grave)
+
+# ------------------------------------------------------------------------------
+# 3. REGRAS DE CLIMA: CHUVA, EXPOSIÇÃO AO CALOR DIURNO E VENTO
+# ------------------------------------------------------------------------------
+inteligencia_climatica:
+  usar_evapotranspiracao_et0_real: true   # Se false (ou offline), usa a 'lamina_base_mm_dia' da fase
+  chuva:
+    descontar_chuva_ultimas_24h_pct: 80   # Aproveita 80% dos mm chovidos ontem
+    adiar_rega_se_chance_chuva_maior_pct: 75
+    adiar_rega_se_chuva_prevista_maior_mm: 5.0
+    proteger_fase_critica_mesmo_com_previsao: true # Se a planta estiver florindo, garante ao menos 50%
+  exposicao_ao_calor_diurno:
+    ativo: true
+    temperatura_limite_estresse_c: 32.0   # Acima de 32°C conta como "hora de estresse de calor"
+    bonus_rega_tarde_por_hora_quente_pct: 4.0 # Soma +4% na rega da tarde p/ cada hora > 32°C (máx +20%)
+    teto_maximo_bonus_calor_pct: 20.0
+  exposicao_ao_vento:
+    ativo: true
+    vento_forte_acima_kmh: 20.0           # Vento seco do Seridó acima de 20 km/h
+    bonus_protecao_vento_pct: 10.0        # Adiciona +10% para compensar ressecamento pelas rajadas
+
+# ------------------------------------------------------------------------------
+# 4. COMPORTAMENTO DOS 4 BOTÕES FÍSICOS DO PAINEL
+# ------------------------------------------------------------------------------
+botoes_fisicos_painel:
+  botao_1_pausar:
+    gpio: 13
+    funcao: "PAUSAR_IRRIGACOES_PLANEJADAS"
+    lembrete_celular_apos_horas: 12
+  botao_2_continuar:
+    gpio: 14
+    funcao: "CONTINUAR_IRRIGACOES_PLANEJADAS"
+  botao_3_liga_tudo_mais_1h:
+    gpio: 26
+    funcao: "IRRIGAR_TUDO_INCREMENTO_1H"
+    maximo_horas_acumuladas: 4
+    modo_execucao: "ALTERNAR_30MIN_POR_ZONA" # Mantém pressão alta no filtro único (ou "SIMULTANEO")
+  botao_4_era_bom_que_chovesse:
+    gpio: 27
+    funcao: "BOOST_LUDICO_PROXIMAS_24H"
+    duracao_efeito_horas: 24
+    aumento_1_clique_pct: 25              # 1 aperto = +25% de água/tempo nas regas das próximas 24h!
+    aumento_2_cliques_pct: 50             # 2 apertos = +50% de água/tempo nas próximas 24h!
+    permitir_margem_extra_na_cota_pct: 15 # Permite usar até +15% acima da cota diária se caixa >= 50%
+
+# ------------------------------------------------------------------------------
+# 5. CONFIGURAÇÃO DAS DUAS ZONAS DE PLANTIO (O CORAÇÃO DO PRO-DUO)
+# ------------------------------------------------------------------------------
+zonas_de_plantio:
+
+  # ============================================================================
+  # 🟦 ZONA 1 (OESTE — 128 m² ÚTEIS) — RELÉ 2 (GPIO 16)
+  # ============================================================================
+  zona_1:
+    id: 1
+    nome: "Zona 1 — Oeste"
+    ativa: true
+    canal_rele: 2
+    gpio_esp32: 16
+    area_total_m2: 128.0
+    mangueiras_16mm_totais: 16
+    mangueiras_16mm_abertas_agora: 8      # Metade aberta (espaçamento 2,0m ideal p/ Maxixe)
+    vazao_nominal_referencia_lpm: 6.5     # Medido pelo Sensor Hall SF1 com filtro limpo
+
+    cultura_atual:
+      id_catalogo: "maxixe"
+      nome_exibicao: "Maxixe"
+      familia_botanica: "Cucurbitáceas"
+      data_plantio: "2026-09-20"          # O sistema calcula o DAP (Dias Após Plantio) a partir daqui!
+      ciclo_previsto_dias: 100
+      cultura_anterior_na_zona: "Feijão Verde (Leguminosas)"
+      proxima_sugerida_rotacao: "Feijão Verde ou Batata-doce"
+
+    # Modo pode ser "INTELIGENTE_POR_ESTAGIO" ou "MANUAL_DIRETO"
+    modo_calculo: "INTELIGENTE_POR_ESTAGIO"
+    ajuste_fino_usuario_pct: 0            # Use ex: +10 ou -10 para aumentar/diminuir tudo em 10%
+
+    turnos_diarios:
+      - horario_inicio: "05:30"
+        proporcao_do_dia_pct: 60          # 60% da água do dia vai bem cedinho
+      - horario_inicio: "16:30"
+        proporcao_do_dia_pct: 40          # 40% no fim da tarde (mais o reforço de calor/vento do dia)
+
+    fases_fenologicas:
+      - fase: 1
+        nome: "Pegamento e Primeiras Folhas"
+        dia_inicio: 1
+        dia_fim: 20
+        fator_kc: 0.50
+        lamina_base_mm_dia: 2.5
+        prioridade_cota: "MEDIA"
+        mensagem_humana: "Mudas jovens de maxixe criando raiz: regas leves e constantes."
+      - fase: 2
+        nome: "Crescimento das Ramas"
+        dia_inicio: 21
+        dia_fim: 42
+        fator_kc: 0.80
+        lamina_base_mm_dia: 3.8
+        prioridade_cota: "MEDIA"
+        mensagem_humana: "Ramas espalhando rápido; aumentando a água gradualmente."
+      - fase: 3
+        nome: "Floração e Início da Frutificação (FASE CRÍTICA)"
+        dia_inicio: 43
+        dia_fim: 60
+        fator_kc: 1.00
+        lamina_base_mm_dia: 4.8
+        prioridade_cota: "MAXIMA_CRITICA"
+        mensagem_humana: "Fase mais sensível do maxixe! Prioridade total de água para segurar as flores e frutos."
+      - fase: 4
+        nome: "Colheita Contínua (Apanha a cada 2-3 dias)"
+        dia_inicio: 61
+        dia_fim: 90
+        fator_kc: 0.90
+        lamina_base_mm_dia: 4.3
+        prioridade_cota: "ALTA"
+        mensagem_humana: "Em plena colheita! Mantendo boa umidade para novos maxixes."
+      - fase: 5
+        nome: "Final de Ciclo"
+        dia_inicio: 91
+        dia_fim: 100
+        fator_kc: 0.65
+        lamina_base_mm_dia: 3.0
+        prioridade_cota: "BAIXA"
+        mensagem_humana: "Finalizando a safra de maxixe; reduzindo rega."
+
+  # ============================================================================
+  # 🟧 ZONA 2 (LESTE — 158 m² ÚTEIS) — RELÉ 3 (GPIO 17)
+  # ============================================================================
+  zona_2:
+    id: 2
+    nome: "Zona 2 — Leste"
+    ativa: true
+    canal_rele: 3
+    gpio_esp32: 17
+    area_total_m2: 158.0
+    mangueiras_16mm_totais: 16
+    mangueiras_16mm_abertas_agora: 8      # Espaçamento de 2,0m para as ramas da Melancia
+    vazao_nominal_referencia_lpm: 7.2     # Medido pelo Sensor Hall SF1
+
+    cultura_atual:
+      id_catalogo: "melancia"
+      nome_exibicao: "Melancia"
+      familia_botanica: "Cucurbitáceas"
+      data_plantio: "2026-08-18"
+      ciclo_previsto_dias: 88
+      cultura_anterior_na_zona: "Batata-doce (Convolvuláceas)"
+      proxima_sugerida_rotacao: "Feijão Verde (para repor nitrogênio no solo)"
+
+    modo_calculo: "INTELIGENTE_POR_ESTAGIO"
+    ajuste_fino_usuario_pct: 0
+
+    turnos_diarios:
+      - horario_inicio: "06:10"           # Entra logo após a Zona 1 terminar (mantém pressão alta!)
+        proporcao_do_dia_pct: 60
+      - horario_inicio: "17:00"
+        proporcao_do_dia_pct: 40
+
+    fases_fenologicas:
+      - fase: 1
+        nome: "Emergência e Pegamento Inicial"
+        dia_inicio: 1
+        dia_fim: 18
+        fator_kc: 0.45
+        lamina_base_mm_dia: 2.2
+        prioridade_cota: "MEDIA"
+        mensagem_humana: "Plantinhas pequenas de melancia; rega suave no pé."
+      - fase: 2
+        nome: "Alongamento de Ramas"
+        dia_inicio: 19
+        dia_fim: 42
+        fator_kc: 0.75
+        lamina_base_mm_dia: 3.8
+        prioridade_cota: "ALTA"
+        mensagem_humana: "Ramas correndo pelo terreno (3 a 4 metros); subindo volume de água."
+      - fase: 3
+        nome: "Floração e Pegamento dos Frutos (FASE CRÍTICA)"
+        dia_inicio: 43
+        dia_fim: 68
+        fator_kc: 1.05
+        lamina_base_mm_dia: 5.5
+        prioridade_cota: "MAXIMA_CRITICA"
+        mensagem_humana: "Melancia florindo e vingando frutos! Proibido passar sede agora."
+      - fase: 4
+        nome: "Crescimento e Engorda dos Frutos"
+        dia_inicio: 69
+        dia_fim: 78
+        fator_kc: 0.75
+        lamina_base_mm_dia: 3.8
+        prioridade_cota: "ALTA"
+        mensagem_humana: "Frutos já grandes; reduzindo um pouco a água para preparar a maturação."
+      - fase: 5
+        nome: "Reta Final Pré-Colheita — Concentração de Açúcar (°Brix)"
+        dia_inicio: 79
+        dia_fim: 88
+        fator_kc: 0.35
+        lamina_base_mm_dia: 1.5
+        prioridade_cota: "BAIXA"
+        mensagem_humana: "🍉 Últimos 10 dias antes da colheita! Água reduzida em 65% para deixar a melancia bem doce e sem rachar."
+
+# ------------------------------------------------------------------------------
+# 6. MAPA COMPLETO DOS 8 RELÉS (3 USADOS NO INÍCIO + 5 CONTABILIZADOS P/ EXPANSÃO)
+# ------------------------------------------------------------------------------
+arquitetura_8_reles_e_expansao:
+  rele_1:
+    gpio: 4
+    funcao: "VALVULA_MESTRE"
+    nome: "Válvula Mestre Geral 12V"
+    ativo_no_hardware: true
+    regra: "Abre sempre junto com qualquer zona de irrigação; fecha em repouso."
+  rele_2:
+    gpio: 16
+    funcao: "VALVULA_ZONA_1"
+    nome: "Válvula Zona 1 (Oeste 128 m²)"
+    ativo_no_hardware: true
+  rele_3:
+    gpio: 17
+    funcao: "VALVULA_ZONA_2"
+    nome: "Válvula Zona 2 (Leste 158 m²)"
+    ativo_no_hardware: true
+  rele_4:
+    gpio: 18
+    funcao: "EXPANSAO_VALVULA_ZONA_3"
+    nome: "Reserva: Futura Válvula Zona 3 (ex: Capim)"
+    ativo_no_hardware: false
+  rele_5:
+    gpio: 19
+    funcao: "EXPANSAO_VALVULA_ZONA_4"
+    nome: "Reserva: Futura Válvula Zona 4 (ex: Palma / Laranjas)"
+    ativo_no_hardware: false
+  rele_6:
+    gpio: 23
+    funcao: "EXPANSAO_BOMBA_AUXILIAR"
+    nome: "Reserva: Futura Bomba Auxiliar 12V"
+    ativo_no_hardware: false
+    atraso_ligar_apos_valvula_seg: 2
+    adiantar_desligar_antes_valvula_seg: 2
+  rele_7:
+    gpio: 25
+    funcao: "EXPANSAO_ILUMINACAO"
+    nome: "Reserva: Luz / Refletor LED do Sítio"
+    ativo_no_hardware: false
+    horarios_programados: []              # Ex: ["18:00-21:00"] quando instalar o refletor
+  rele_8:
+    gpio: 5
+    funcao: "EXPANSAO_CAMERA_OU_ACESSORIO"
+    nome: "Reserva: Câmera Wi-Fi / Sirene / Acessório 12V"
+    ativo_no_hardware: false
+    manter_sempre_ligado: false
+
+  entradas_sensores_extras_esp32:
+    gpio_35: { nome: "Reserva Sensor Extra 1 (ex: Temperatura Solo)", ativo: false }
+    gpio_36: { nome: "Reserva Sensor Extra 2 (ex: Umidade Solo)", ativo: false }
+    gpio_39: { nome: "Reserva Sensor Extra 3 (ex: Tensão Bateria Solar)", ativo: false }

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Irriga.ai Pro-Duo</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+  <link rel="apple-touch-icon" href="./icon.svg" />
+  <meta name="theme-color" content="#F2F4F8" />
+  <!-- Suporte Nativo a Instalação na Tela Inicial (Android & iPhone iOS) -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Irriga.ai" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ==========================================================================
+       🍎 APPLE DAYLIGHT THEME (PADRÃO — MÁXIMA LEGIBILIDADE E ELEGÂNCIA)
+       ========================================================================== */
+    :root {
+      --bg-page: #F2F4F8;
+      --bg-ambient-1: rgba(16, 185, 129, 0.10);
+      --bg-ambient-2: rgba(14, 165, 233, 0.09);
+      --card-bg: rgba(255, 255, 255, 0.92);
+      --card-border: rgba(15, 23, 42, 0.08);
+      --card-shadow: 0 10px 30px -8px rgba(15, 23, 42, 0.07), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+      --subcard-bg: #F8FAFC;
+      --subcard-border: #E2E8F0;
+      --text-main: #0F172A;
+      --text-secondary: #334155;
+      --text-muted: #64748B;
+      --ring-track: #E2E8F0;
+      --sheet-bg: rgba(255, 255, 255, 0.98);
+    }
+
+    /* Modo Noturno Opcional */
+    html.dark-mode {
+      --bg-page: #060B16;
+      --bg-ambient-1: rgba(16, 185, 129, 0.14);
+      --bg-ambient-2: rgba(14, 165, 233, 0.10);
+      --card-bg: rgba(15, 23, 42, 0.82);
+      --card-border: rgba(255, 255, 255, 0.10);
+      --card-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.45);
+      --subcard-bg: rgba(2, 6, 23, 0.65);
+      --subcard-border: rgba(255, 255, 255, 0.08);
+      --text-main: #F8FAFC;
+      --text-secondary: #CBD5E1;
+      --text-muted: #94A3B8;
+      --ring-track: rgba(255, 255, 255, 0.10);
+      --sheet-bg: rgba(15, 23, 42, 0.97);
+    }
+
+    * {
+      -webkit-tap-highlight-color: transparent;
+      box-sizing: border-box;
+    }
+
+    body {
+      background-color: var(--bg-page);
+      background-image:
+        radial-gradient(at 10% 0%, var(--bg-ambient-1) 0px, transparent 55%),
+        radial-gradient(at 90% 5%, var(--bg-ambient-2) 0px, transparent 55%);
+      background-attachment: fixed;
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", system-ui, sans-serif;
+      margin: 0;
+      padding: 0;
+      letter-spacing: -0.014em;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    .apple-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(24px) saturate(180%);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      border: 1px solid var(--card-border);
+      box-shadow: var(--card-shadow);
+      color: var(--text-main);
+      transition: all 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .apple-subcard {
+      background: var(--subcard-bg);
+      border: 1px solid var(--subcard-border);
+      color: var(--text-main);
+    }
+
+    .apple-sheet {
+      background: var(--sheet-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+    }
+
+    .apple-text-secondary { color: var(--text-secondary); }
+    .apple-text-muted { color: var(--text-muted); }
+
+    .apple-tile {
+      background: var(--card-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--card-border);
+      box-shadow: var(--card-shadow);
+      border-radius: 22px;
+      color: var(--text-main);
+      transition: all 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .apple-tile:active, .apple-btn-press:active {
+      transform: scale(0.96);
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.2); }
+    }
+
+    .live-dot {
+      animation: pulseGlow 2.2s infinite ease-in-out;
+    }
+
+    @keyframes sheetSlideUp {
+      from { opacity: 0; transform: translateY(20px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .ios-sheet-animate {
+      animation: sheetSlideUp 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.25); border-radius: 9999px; }
+  </style>
+  <script>
+    // Interface principal focada na experiência Apple (Tema Claro por padrão)
+    window.IRRIGA_GUI_MODE = "END_USER";
+  </script>
+</head>
+<body class="min-h-screen antialiased selection:bg-emerald-600 selection:text-white">
+
+  <!-- Dynamic Island Toast Notification -->
+  <div id="toast-banner" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-full bg-slate-900 text-white text-xs sm:text-sm font-semibold shadow-2xl border border-slate-700 max-w-md text-center transition-all"></div>
+
+  <!-- Container de Modais e Action Sheets iOS -->
+  <div id="ios-modal-root"></div>
+
+  <!-- Input Oculto para Upload Direto de Arquivo .YAML Recebido do Claude -->
+  <input id="hidden-yaml-file-input" type="file" accept=".yaml,.yml,.txt" class="hidden" onchange="handleYamlFileUpload(event)" />
+
+  <!-- Container Principal Renderizado pelo Motor Pro-Duo -->
+  <main id="app-container"></main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

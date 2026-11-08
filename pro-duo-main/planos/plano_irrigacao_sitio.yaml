@@ -1,0 +1,135 @@
+# ==============================================================================
+# 🌱 IRRIGA.AI PRO-DUO (v1.5-Argon · Motor FAO-56) — PLANO & DIAGNÓSTICO DO SÍTIO
+# ==============================================================================
+# 🧠 INSTRUÇÕES DIRETAS PARA O CLAUDE (PERITO AGRÔNOMO DO SÍTIO):
+# 1. Você é o Engenheiro Agrônomo Sênior (especialista em olericultura e fruticultura
+#    irrigada por gotejamento no Semiárido Paraibano — São Vicente do Seridó, PB)
+#    do sistema Irriga.ai Pro-Duo.
+# 2. Analise abaixo:
+#    - O 'relato_do_produtor_hoje' (sintomas observados em campo e pedido do usuário)
+#    - O 'diagnostico_tempo_real_hoje' e o 'balanco_hidrico_solo_fao56' de cada zona.
+# 3. Se precisar ajustar qualquer parâmetro do sistema, devolva um bloco ```yaml ... ```
+#    contendo as chaves que deseja alterar (ou o arquivo completo).
+# 4. GUARDRAILS OBRIGATÓRIOS:
+#    - Culturas válidas (id_catalogo): "melancia", "jerimum", "maxixe", "feijao_verde", "batata_doce", "milho_verde", "quiabo", "coentro", "macaxeira".
+#    - Tipos de solo válidos (tipo_solo): "arenoso", "franco_arenoso", "franco", "argiloso".
+#    - Cota diária máxima (cota_diaria_maxima_litros): entre 50 e 5000 L.
+#    - NUNCA recomende repetir a mesma família botânica seguida na mesma zona.
+#    - NUNCA use os GPIOs proibidos [13, 14, 26, 27, 32, 33, 12, 15, 34] para relés.
+# ==============================================================================
+versao_padrao: "1.5-argon"
+sistema: "Irriga.ai Pro-Duo"
+data_referencia_sistema: "2026-11-07"
+
+relato_do_produtor_hoje:
+  sintomas_selecionados: ["🥀 Murcha nas horas quentes"]
+  observacao_humana: "Verificacao de rotina do sitio"
+
+localizacao_sitio:
+  nome: "Sítio — São Vicente do Seridó (PB)"
+  latitude: -6.95325
+  longitude: -36.36853
+  fuso_horario: "America/Fortaleza"
+  tipo_solo: "franco_arenoso"
+
+cotas_e_seguranca:
+  capacidade_caixa_litros: 5000
+  nivel_atual_caixa_litros: 3750
+  reserva_minima_obrigatoria_pct: 25
+  cota_diaria_maxima_litros: 1000
+  margem_extra_era_bom_chover_pct: 15
+  eficiencia_filtro_120_mesh_pct: 100
+
+janelas_e_guarda_termica:
+  termino_alvorada_hhmm: "05:30"
+  inicio_mais_cedo_noite_hhmm: "18:30"
+  pulso_entardecer_hhmm: "17:15"
+  duracao_max_pulso_min: 90
+  intervalo_entre_zonas_min: 5
+  guarda_termica_inicio_hhmm: "09:30"
+  guarda_termica_fim_hhmm: "16:30"
+  multiplo_minimo_volume_mangueira: 5
+
+diagnostico_tempo_real_hoje:
+  clima_data: "2026-11-07"
+  et0_mm_dia: 6.47
+  temperatura_maxima_c: 33.7
+  vento_maximo_kmh: 23.3
+  chuva_prevista_mm: 0.0
+  probabilidade_chuva_pct: 0
+  volume_total_planejado_hoje_litros: 0
+  corte_cota_aplicado: false
+  era_bom_que_chovesse_boost_pct: 0
+
+zonas_de_plantio:
+  zona_1:
+    id: 1
+    nome: "Zona 1 — Oeste"
+    ativa: true
+    area_m2: 128
+    mangueiras_16mm_total: 16
+    mangueiras_16mm_abertas_agora: 8
+    comprimento_linha_m: 8
+    espacamento_gotejadores_m: 0.3
+    vazao_nominal_furo_lph: 1.6
+    vazao_calibrada_sf1_lpm: 0
+    vazao_efetiva_calculada_lpm: 2.41
+    volume_interno_mangueira_litros: 12.3
+    cobertura_morta_palhada: false
+    ajuste_fino_usuario_pct: 0
+    cultura_atual:
+      id_catalogo: "maxixe"
+      nome: "Maxixe"
+      familia_botanica: "Cucurbitáceas"
+      data_plantio: "2026-09-20"
+      familia_anterior_rotacao: "Leguminosas"
+      dia_atual_ciclo_dap: 49
+      ciclo_total_dias: 100
+      fase_atual: "Floração"
+      kc_efetivo_hoje: 0.63
+      sensibilidade_ky_fao33: 1.1
+      profundidade_raiz_m: 0.70
+    balanco_hidrico_solo_fao56:
+      capacidade_balde_taw_mm: 24.5
+      limite_conforto_raw_mm: 12.3
+      esgotamento_atual_dr_mm: 2.40
+      umidade_disponivel_pct: 90
+      demanda_planta_hoje_etc_mm: 4.11
+      rega_planejada_hoje_litros: 0
+      pulsos_agenda_hoje: "Nenhum pulso necessário"
+
+  zona_2:
+    id: 2
+    nome: "Zona 2 — Leste"
+    ativa: true
+    area_m2: 158
+    mangueiras_16mm_total: 16
+    mangueiras_16mm_abertas_agora: 8
+    comprimento_linha_m: 9.875
+    espacamento_gotejadores_m: 0.3
+    vazao_nominal_furo_lph: 1.6
+    vazao_calibrada_sf1_lpm: 0
+    vazao_efetiva_calculada_lpm: 2.98
+    volume_interno_mangueira_litros: 14.5
+    cobertura_morta_palhada: false
+    ajuste_fino_usuario_pct: 0
+    cultura_atual:
+      id_catalogo: "melancia"
+      nome: "Melancia"
+      familia_botanica: "Cucurbitáceas"
+      data_plantio: "2026-08-18"
+      familia_anterior_rotacao: "Convolvuláceas"
+      dia_atual_ciclo_dap: 82
+      ciclo_total_dias: 88
+      fase_atual: "Maturação (°Brix)"
+      kc_efetivo_hoje: 0.72
+      sensibilidade_ky_fao33: 0.3
+      profundidade_raiz_m: 0.80
+    balanco_hidrico_solo_fao56:
+      capacidade_balde_taw_mm: 28.0
+      limite_conforto_raw_mm: 11.2
+      esgotamento_atual_dr_mm: 3.10
+      umidade_disponivel_pct: 89
+      demanda_planta_hoje_etc_mm: 4.66
+      rega_planejada_hoje_litros: 0
+      pulsos_agenda_hoje: "Nenhum pulso necessário"

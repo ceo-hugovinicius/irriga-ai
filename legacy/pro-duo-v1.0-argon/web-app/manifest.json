@@ -1,0 +1,27 @@
+{
+  "id": "/pro-duo/web-app/index.html",
+  "name": "Irriga.ai Pro-Duo — Gestão Inteligente de Irrigação",
+  "short_name": "Irriga.ai",
+  "description": "Controle inteligente e humano de 2 zonas de irrigação por estágio da cultura e clima em São Vicente do Seridó - PB.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F2F4F8",
+  "theme_color": "#F2F4F8",
+  "orientation": "portrait-primary",
+  "categories": ["agriculture", "utilities", "productivity"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

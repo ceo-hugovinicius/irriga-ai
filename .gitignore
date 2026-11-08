@@ -1,0 +1,15 @@
+# Dependências e builds locais
+node_modules/
+.pio/
+build/
+dist/
+
+# Arquivos temporários do sistema
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+# Segredos / variáveis locais
+.env
+.env.local

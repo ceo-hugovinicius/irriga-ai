@@ -1,0 +1,165 @@
+{
+  "data_calculo": "2026-11-06",
+  "resumo_humano_do_dia": [
+    "☀️ Calor forte hoje (34.8°C com 3.5h acima de 32°C): adicionamos +14% de água fresca para recuperar as plantas.",
+    "💨 Vento seco de 24.0 km/h detectado: proteção eólica de +10% ativada."
+  ],
+  "clima_processado": {
+    "et0_mm": 5.4,
+    "temp_max_c": 34.8,
+    "hours_above_32c": 3.5,
+    "wind_max_kmh": 24.0,
+    "bonus_calor_aplicado_pct": 14.0,
+    "bonus_vento_aplicado_pct": 10.0,
+    "bonus_era_bom_que_chovesse_pct": 0.0
+  },
+  "cota_diaria": {
+    "cota_configurada_litros": 1000.0,
+    "cota_efetiva_hoje_litros": 1000.0,
+    "litros_totais_planejados_hoje": 886.4,
+    "rateio_de_protecao_acionado": false
+  },
+  "zonas": {
+    "zona_1": {
+      "id": 1,
+      "nome": "Zona 1 — Oeste",
+      "cultura": "Maxixe",
+      "familia": "Cucurbitáceas",
+      "data_plantio": "2026-09-20",
+      "dap_atual": 48,
+      "ciclo_total_dias": 100,
+      "progresso_ciclo_pct": 48.0,
+      "fase_atual": {
+        "fase": 3,
+        "nome": "Floração e Início da Frutificação (FASE CRÍTICA)",
+        "dia_inicio": 43,
+        "dia_fim": 60,
+        "fator_kc": 1.0,
+        "lamina_base_mm_dia": 4.8,
+        "prioridade_cota": "MAXIMA_CRITICA",
+        "mensagem_humana": "Fase mais sensível do maxixe! Prioridade total de água para segurar as flores e frutos."
+      },
+      "lamina_base_mm": 5.4,
+      "lamina_final_mm": 6.7,
+      "litros_pedidos_sem_corte": 619.0,
+      "litros_aprovados_cota": 619.0,
+      "status_clima_zona": "NORMAL",
+      "vazao_referencia_lpm": 6.5,
+      "turnos_calculados": [
+        {
+          "turno": 1,
+          "janela_elastica": "Alvorada Ótima",
+          "horario_inicio": "04:48",
+          "horario_termino": "05:45",
+          "motivo_janela": "Termina exatamente ao nascer do sol (05:45)",
+          "meta_litros_sensor_sf1": 371.4,
+          "duracao_estimada_min": 57.1
+        },
+        {
+          "turno": 2,
+          "janela_elastica": "Crepúsculo (Tubo Frio -12°C)",
+          "horario_inicio": "17:05",
+          "horario_termino": "17:43",
+          "motivo_janela": "Deslocado p/ 17:05 (esfria mangueira PEBD e reduz ~7% evaporação)",
+          "meta_litros_sensor_sf1": 247.6,
+          "duracao_estimada_min": 38.1
+        }
+      ]
+    },
+    "zona_2": {
+      "id": 2,
+      "nome": "Zona 2 — Leste",
+      "cultura": "Melancia",
+      "familia": "Cucurbitáceas",
+      "data_plantio": "2026-08-18",
+      "dap_atual": 81,
+      "ciclo_total_dias": 88,
+      "progresso_ciclo_pct": 92.0,
+      "fase_atual": {
+        "fase": 5,
+        "nome": "Reta Final Pré-Colheita — Concentração de Açúcar (°Brix)",
+        "dia_inicio": 79,
+        "dia_fim": 88,
+        "fator_kc": 0.35,
+        "lamina_base_mm_dia": 1.5,
+        "prioridade_cota": "BAIXA",
+        "mensagem_humana": "🍉 Últimos 10 dias antes da colheita! Água reduzida em 65% para deixar a melancia bem doce e sem rachar."
+      },
+      "lamina_base_mm": 1.89,
+      "lamina_final_mm": 2.34,
+      "litros_pedidos_sem_corte": 267.4,
+      "litros_aprovados_cota": 267.4,
+      "status_clima_zona": "NORMAL",
+      "vazao_referencia_lpm": 7.2,
+      "turnos_calculados": [
+        {
+          "turno": 1,
+          "janela_elastica": "Alvorada (Seq. Z1)",
+          "horario_inicio": "05:50",
+          "horario_termino": "06:12",
+          "motivo_janela": "Entra 5 min após Zona 1 (100% pressão no filtro 120M)",
+          "meta_litros_sensor_sf1": 160.4,
+          "duracao_estimada_min": 22.3
+        },
+        {
+          "turno": 2,
+          "janela_elastica": "Crepúsculo (Tubo Frio -12°C)",
+          "horario_inicio": "17:48",
+          "horario_termino": "18:03",
+          "motivo_janela": "Entra 5 min após Zona 1 (100% pressão no filtro 120M)",
+          "meta_litros_sensor_sf1": 107.0,
+          "duracao_estimada_min": 14.9
+        }
+      ]
+    }
+  },
+  "payload_esp32_compacto": {
+    "v": "1.0-pro-duo",
+    "date": "2026-11-06",
+    "paused": false,
+    "boost_24h_pct": 0.0,
+    "quota_max_l": 1000.0,
+    "max_valve_min": 180,
+    "filter_warn_pct": 80,
+    "relays_map": {
+      "r1_master": 4,
+      "r2_z1": 16,
+      "r3_z2": 17,
+      "r4_exp_z3": 18,
+      "r5_exp_z4": 19,
+      "r6_exp_pump": 23,
+      "r7_exp_light": 25,
+      "r8_exp_cam": 5
+    },
+    "schedule": [
+      {
+        "zone": 1,
+        "relay": 2,
+        "time": "04:48",
+        "liters": 371.4,
+        "max_min": 57.1
+      },
+      {
+        "zone": 1,
+        "relay": 2,
+        "time": "17:05",
+        "liters": 247.6,
+        "max_min": 38.1
+      },
+      {
+        "zone": 2,
+        "relay": 3,
+        "time": "05:50",
+        "liters": 160.4,
+        "max_min": 22.3
+      },
+      {
+        "zone": 2,
+        "relay": 3,
+        "time": "17:48",
+        "liters": 107.0,
+        "max_min": 14.9
+      }
+    ]
+  }
+}

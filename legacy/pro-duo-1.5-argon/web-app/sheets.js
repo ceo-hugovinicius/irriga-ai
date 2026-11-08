@@ -1,0 +1,798 @@
+/* ============================================================================
+ * Irriga.ai Pro-Duo · v1.5.2-Argon — Sheets / Modais Interativos (sheets.js)
+ * "Simplicidade de uso sem perda de funcionalidade"
+ * ========================================================================== */
+const Y = window.IrrigaYaml;
+let sintomasSelecionados = [];
+let relatoClaudeTexto = '';
+
+function abrirModal(html) {
+  const m = document.getElementById('modal');
+  m.innerHTML = `<div class="scrim" onclick="if(event.target===this)fecharModal()">
+    <div class="sheet" role="dialog" aria-modal="true">
+      <div class="grab"></div>
+      ${html}
+    </div>
+  </div>`;
+}
+function fecharModal() {
+  const m = document.getElementById('modal');
+  if (m) m.innerHTML = '';
+}
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharModal(); });
+
+function avisoCadeado() {
+  if (!S.ui.locked) return '';
+  return `<div class="locked-note row between">
+    <span>🔒 Cadeado ativo contra toques acidentais.</span>
+    <button class="btn sm" style="background:var(--card);padding:5px 10px" onclick="S.ui.locked=false;salvar();render();toast('🔓 Destravado para edição')">🔓 Destravar</button>
+  </div>`;
+}
+
+/* ============================================================================
+ * 1. MODAL DAS LUZES DE ESPIA (CLICÁVEL MESMO COM CADEADO 🔒 TRANCADO)
+ * ========================================================================== */
+function abrirEspia(id) {
+  const lista = window.ULTIMAS_ESPIAS || [];
+  const e = lista.find((x) => x.id === id) || lista[0];
+  if (!e) return;
+
+  const outras = lista.filter((x) => x.id !== e.id);
+
+  abrirModal(`
+    <div class="row between" style="margin-bottom:8px">
+      <span class="pill ${e.cor}"><span class="espia-led"></span>Luz de Espia do Painel</span>
+      <span class="t12 mute">${S.ui.locked ? '🔒 Consulta livre' : '🔓 Painel aberto'}</span>
+    </div>
+    <h3>${e.titulo}</h3>
+    <p class="t14 ink2" style="margin-top:6px;line-height:1.5">${e.resumo}</p>
+    ${e.detalhe ? `<div class="alert info" style="margin-top:12px"><span class="ic">💡</span><div class="t14" style="line-height:1.45">${e.detalhe}</div></div>` : ''}
+    ${e.acao ? `<button class="btn primary full" style="margin-top:14px" onclick='${e.acao[1]}'>${e.acao[0]} →</button>` : ''}
+    ${outras.length ? `
+      <div style="margin-top:16px">
+        <div class="t12 mute b" style="margin-bottom:6px;text-transform:uppercase">Outros avisos ativos:</div>
+        <div class="telltales">
+          ${outras.map((x) => `<button class="espia ${x.cor}" onclick="abrirEspia('${x.id}')"><span class="espia-led"></span><span>${x.ic} ${esc(x.curto)}</span></button>`).join('')}
+        </div>
+      </div>` : ''}
+    <button class="btn full" style="margin-top:14px" onclick="fecharModal()">Fechar</button>
+  `);
+}
+
+/* ============================================================================
+ * 2. OS 4 BOTÕES DE AÇÃO HUMANA + NOVO OVERRIDE "REGAR AGORA" (HORAS ⇄ LITROS)
+ * ========================================================================== */
+function abrirPausa() {
+  const p = pausado();
+  if (p) {
+    abrirModal(`
+      <h3>▶️ Retomar irrigação automática?</h3>
+      <p class="t14 ink2">${S.pause.indefinite ? 'As regas estão pausadas sem prazo.' : `A pausa atual terminaria sozinha ${quando(Date.parse(S.pause.until))}.`}</p>
+      <div style="display:grid;gap:8px;margin-top:14px">
+        <button class="btn primary full" onclick="retomar('app');fecharModal();toast('▶️ Piloto automático retomado!')">▶️ Retomar automático agora</button>
+        <button class="btn full" onclick="pausar(4,'app');fecharModal();toast('⏸️ Pausa estendida por +4 horas')">⏸️ Continuar pausado por mais 4 h</button>
+        <button class="btn full" onclick="fecharModal()">Fechar</button>
+      </div>
+    `);
+    return;
+  }
+  abrirModal(`
+    <h3>⏸️ Pausar regas</h3>
+    <p class="t14 ink2">Na pausa com tempo, o sistema <b>volta sozinho ao automático</b> depois — sem risco de esquecer desligado.</p>
+    <div style="display:grid;gap:8px;margin-top:14px">
+      <button class="btn primary full" onclick="pausar(2,'app');fecharModal();toast('⏸️ Pausado por 2 h (volta sozinho)')">⏸️ Pausar por 2 horas (volta sozinho)</button>
+      <button class="btn full" onclick="pausar(6,'app');fecharModal();toast('⏸️ Pausado por 6 h (volta sozinho)')">⏸️ Pausar por 6 horas (trabalho na horta)</button>
+      <button class="btn danger full" onclick="pausar(0,'app');fecharModal();toast('⏸️ Pausado até você retomar')">🛑 Pausar sem prazo (manual)</button>
+      <button class="btn full" onclick="fecharModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+/* Estado do Modal "Regar Agora" (Override / Flex com Conversor Horas ⇄ Litros) */
+let regarModo = 'horas';      // 'horas' | 'litros'
+let regarHorasVal = 1.0;      // ex.: 1 hora no total
+let regarLitrosVal = 500;     // ex.: 500 litros no total
+let regarZonasSel = [0, 1];   // [0, 1] (As 2 zonas), [0] (Só Zona 1), [1] (Só Zona 2)
+
+function calcularConversaoRegar(modo, valor, zonasIdx) {
+  const alvos = (Array.isArray(zonasIdx) && zonasIdx.length) ? zonasIdx : [0, 1];
+  const vazoesLpm = alvos.map((idx) => Math.max(0.1, C.vazaoZona(S.zones[idx], S.soil)));
+  const detalhes = [];
+
+  if (modo === 'horas') {
+    const horasTotal = Math.max(0.1, Number(valor) || 1);
+    const minTotal = horasTotal * 60;
+    // Se 2 zonas selecionadas, divide o tempo igualmente (ex: 1h = 30 min Zona 1 + 30 min Zona 2)
+    const minPorZona = minTotal / alvos.length;
+    const minutosMap = {};
+    let litrosTotal = 0;
+    alvos.forEach((idx, k) => {
+      const l = minPorZona * vazoesLpm[k];
+      minutosMap[idx] = minPorZona;
+      litrosTotal += l;
+      detalhes.push({
+        zona: S.zones[idx].id,
+        nome: S.zones[idx].nome.split('—')[0].trim(),
+        minutos: minPorZona,
+        litros: l,
+        vazaoLph: Math.round(vazoesLpm[k] * 60),
+      });
+    });
+    return {
+      modo: 'horas',
+      horasTotal,
+      minTotal,
+      litrosTotal,
+      minutosMap,
+      litrosMap: null,
+      detalhes,
+      frasePrincipal: `Regando por ${ fmtMin(minTotal) } → Vai gastar ${ fmtL(litrosTotal) }`,
+      fraseSub: alvos.length === 2
+        ? `Dividido em ${fmtMin(minPorZona)} na Zona 1 (${fmtL(detalhes[0].litros)}) + ${fmtMin(minPorZona)} na Zona 2 (${fmtL(detalhes[1].litros)})`
+        : `Em ${detalhes[0].nome} com vazão de ${detalhes[0].vazaoLph} L/hora`,
+    };
+  } else {
+    const litrosTotal = Math.max(10, Number(valor) || 500);
+    // Se 2 zonas selecionadas, divide os litros igualmente entre as zonas selecionadas
+    const litrosPorZona = litrosTotal / alvos.length;
+    const litrosMap = {};
+    let minTotal = 0;
+    alvos.forEach((idx, k) => {
+      const m = litrosPorZona / vazoesLpm[k];
+      litrosMap[idx] = litrosPorZona;
+      minTotal += m;
+      detalhes.push({
+        zona: S.zones[idx].id,
+        nome: S.zones[idx].nome.split('—')[0].trim(),
+        minutos: m,
+        litros: litrosPorZona,
+        vazaoLph: Math.round(vazoesLpm[k] * 60),
+      });
+    });
+    return {
+      modo: 'litros',
+      horasTotal: minTotal / 60,
+      minTotal,
+      litrosTotal,
+      minutosMap: null,
+      litrosMap,
+      detalhes,
+      frasePrincipal: `Irrigando ${ fmtL(litrosTotal) } → Vai durar ${ fmtMin(minTotal) }`,
+      fraseSub: alvos.length === 2
+        ? `Dividido em ${fmtL(litrosPorZona)} na Zona 1 (${fmtMin(detalhes[0].minutos)}) + ${fmtL(litrosPorZona)} na Zona 2 (${fmtMin(detalhes[1].minutos)})`
+        : `Em ${detalhes[0].nome} com vazão de ${detalhes[0].vazaoLph} L/hora`,
+    };
+  }
+}
+
+function atualizarInputRegar(val) {
+  if (regarModo === 'horas') regarHorasVal = Math.max(0.1, Number(val) || 0.5);
+  else regarLitrosVal = Math.max(10, Number(val) || 100);
+  const calc = calcularConversaoRegar(regarModo, regarModo === 'horas' ? regarHorasVal : regarLitrosVal, regarZonasSel);
+  const elPrin = document.getElementById('conv-frase-principal');
+  const elSub = document.getElementById('conv-frase-sub');
+  const elLista = document.getElementById('conv-lista-zonas');
+  const elBtn = document.getElementById('btn-confirmar-override');
+  if (elPrin) elPrin.textContent = calc.frasePrincipal;
+  if (elSub) elSub.textContent = calc.fraseSub;
+  if (elLista) {
+    elLista.innerHTML = calc.detalhes.map((d) => `
+      <div class="li t14">
+        <span class="b">${esc(d.nome)} <span class="mute t12">(${d.vazaoLph} L/h)</span></span>
+        <span><b>${fmtL(d.litros)}</b> · <b>${fmtMin(d.minutos)}</b></span>
+      </div>
+    `).join('');
+  }
+  if (elBtn) {
+    elBtn.textContent = `💧 Ligar Override Agora (${fmtL(calc.litrosTotal)} · ${fmtMin(calc.minTotal)})`;
+  }
+}
+
+function confirmarOverrideModal() {
+  const calc = calcularConversaoRegar(regarModo, regarModo === 'horas' ? regarHorasVal : regarLitrosVal, regarZonasSel);
+  acionarOverrideRega({
+    zonasIdx: regarZonasSel,
+    minutosPorZona: calc.minutosMap,
+    litrosPorZona: calc.litrosMap,
+    origem: 'app',
+    rotulo: `💧 Override Manual (${calc.modo === 'horas' ? fmtMin(calc.minTotal) : fmtL(calc.litrosTotal)})`,
+  });
+  fecharModal();
+  toast(`💧 Rega manual iniciada: ${fmtL(calc.litrosTotal)} (${fmtMin(calc.minTotal)})!`);
+}
+
+function abrirRegarAgora(zonasIniciais) {
+  if (Array.isArray(zonasIniciais) && zonasIniciais.length) regarZonasSel = zonasIniciais;
+  const manualAtivo = S.manual && S.manual.fim > Date.now();
+  const selKey = regarZonasSel.length === 2 ? 'ambas' : String(regarZonasSel[0]);
+  const calc = calcularConversaoRegar(regarModo, regarModo === 'horas' ? regarHorasVal : regarLitrosVal, regarZonasSel);
+
+  // Calcula também quanto dá +1h Flex (30 min Z1 + 30 min Z2) para exibir no botão rápido
+  const flexCalc = calcularConversaoRegar('horas', 1.0, [0, 1]);
+
+  abrirModal(`
+    <div class="row between" style="margin-bottom:4px">
+      <h3>💧 Regar Agora (Override Manual)</h3>
+      <span class="pill blue">Força Total</span>
+    </div>
+    <p class="t13 ink2">
+      Ligue a irrigação a qualquer momento. Este comando é um <b>override</b>: entra na conta do dia, mas <b>libera água mesmo se a cota diária já tiver sido atingida</b>.
+    </p>
+
+    ${manualAtivo ? `
+      <div class="alert warn">
+        <span class="ic">💧</span>
+        <div style="flex:1">
+          <b>Override em andamento (${fmtL(S.manual.litrosTotal)} liberados hoje).</b>
+          <div class="t12">Você pode somar mais tempo/água abaixo ou parar agora.</div>
+          <div style="margin-top:6px">
+            <button class="btn danger sm" onclick="cancelarRegaManual();fecharModal()">✕ Parar e cancelar rega manual</button>
+          </div>
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- Botão Rápido "Little Treat / Flex" igual ao botão físico da caixa -->
+    <div class="card" style="margin-top:12px;background:var(--sub);padding:12px 14px;border:1px dashed var(--blue-bd)">
+      <div class="row between">
+        <div>
+          <div class="t13 b">🔥 Atalho "+1 Hora Flex" (Igual ao Botão Físico)</div>
+          <div class="t12 mute">30 min na Zona 1 + 30 min na Zona 2 = <b>${fmtL(flexCalc.litrosTotal)}</b></div>
+        </div>
+        <button class="btn blue sm" onclick="botaoFisicoFlex1Hora('app');fecharModal()">+1h Agora</button>
+      </div>
+    </div>
+
+    <!-- 1. Seleção de Zonas -->
+    <div class="field">
+      <label>1. Onde você quer irrigar?</label>
+      <div class="seg">
+        <button class="${selKey === 'ambas' ? 'sel' : ''}" onclick="regarZonasSel=[0,1];abrirRegarAgora()">As 2 zonas (1 e 2)</button>
+        <button class="${selKey === '0' ? 'sel' : ''}" onclick="regarZonasSel=[0];abrirRegarAgora()">Só Zona 1</button>
+        <button class="${selKey === '1' ? 'sel' : ''}" onclick="regarZonasSel=[1];abrirRegarAgora()">Só Zona 2</button>
+      </div>
+    </div>
+
+    <!-- 2. Seleção de Unidade: Horas vs. Litros -->
+    <div class="field">
+      <label>2. Como prefere definir a rega?</label>
+      <div class="seg">
+        <button class="${regarModo === 'horas' ? 'sel' : ''}" onclick="regarModo='horas';abrirRegarAgora()">⏱️ Por Tempo (Horas)</button>
+        <button class="${regarModo === 'litros' ? 'sel' : ''}" onclick="regarModo='litros';abrirRegarAgora()">🪣 Por Volume (Litros)</button>
+      </div>
+    </div>
+
+    <!-- 3. Entrada de Valor + Atalhos Rápidos -->
+    ${regarModo === 'horas' ? `
+      <div class="field">
+        <label>Quantas horas de rega? (Ex.: 0,5h = 30 min · 2h = 2 horas)</label>
+        <div class="chips" style="margin-bottom:8px">
+          ${[
+            { h: 0.5, lbl: '30 min (0,5h)' },
+            { h: 1.0, lbl: '1 hora' },
+            { h: 1.5, lbl: '1h 30m' },
+            { h: 2.0, lbl: '2 horas' },
+            { h: 3.0, lbl: '3 horas' },
+          ].map((op) => `<button class="chip ${Math.abs(regarHorasVal - op.h) < 0.05 ? 'sel' : ''}" onclick="regarHorasVal=${op.h};abrirRegarAgora()">${op.lbl}</button>`).join('')}
+        </div>
+        <input type="number" step="0.25" min="0.1" max="12" value="${regarHorasVal}" oninput="atualizarInputRegar(this.value)" placeholder="Digite as horas (ex: 2)" />
+      </div>
+    ` : `
+      <div class="field">
+        <label>Quantos litros de água quer jogar?</label>
+        <div class="chips" style="margin-bottom:8px">
+          ${[200, 500, 1000, 1500, 2000].map((l) => `<button class="chip ${Math.abs(regarLitrosVal - l) < 5 ? 'sel' : ''}" onclick="regarLitrosVal=${l};abrirRegarAgora()">${fmtL(l)}</button>`).join('')}
+        </div>
+        <input type="number" step="50" min="20" max="5000" value="${regarLitrosVal}" oninput="atualizarInputRegar(this.value)" placeholder="Digite os litros (ex: 1500)" />
+      </div>
+    `}
+
+    <!-- 4. Painel de Conversão Automática em Tempo Real (Horas ⇄ Litros) -->
+    <div class="conv-box">
+      <div class="t12 b" style="text-transform:uppercase;letter-spacing:.04em;opacity:.85">🔄 Conversão Automática</div>
+      <div id="conv-frase-principal" style="font-size:17px;font-weight:850;margin-top:3px">${esc(calc.frasePrincipal)}</div>
+      <div id="conv-frase-sub" class="t12" style="margin-top:3px;opacity:.9">${esc(calc.fraseSub)}</div>
+    </div>
+
+    <div id="conv-lista-zonas" class="card" style="margin-top:10px;background:var(--sub);padding:10px 14px">
+      ${calc.detalhes.map((d) => `
+        <div class="li t14">
+          <span class="b">${esc(d.nome)} <span class="mute t12">(${d.vazaoLph} L/h)</span></span>
+          <span><b>${fmtL(d.litros)}</b> · <b>${fmtMin(d.minutos)}</b></span>
+        </div>
+      `).join('')}
+    </div>
+
+    <div style="display:grid;gap:8px;margin-top:14px">
+      <button id="btn-confirmar-override" class="btn blue full" onclick="confirmarOverrideModal()">
+        💧 Ligar Override Agora (${fmtL(calc.litrosTotal)} · ${fmtMin(calc.minTotal)})
+      </button>
+      <button class="btn full" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
+}
+
+function abrirBoost() {
+  const atual = S.boost.pct > 0 && Date.parse(S.boost.until) > Date.now() ? S.boost.pct : 0;
+  abrirModal(`
+    <h3>🌧️ "Era bom que chovesse"</h3>
+    <p class="t14 ink2">Achou o dia muito quente ou seco? Aumente a água das próximas <b>24 horas</b> com 1 toque. Depois volta sozinho ao normal.</p>
+    <div style="display:grid;gap:8px;margin-top:14px">
+      <button class="btn ${atual === 25 ? 'primary' : ''} full" onclick="S.boost={pct:25,until:new Date(Date.now()+86400e3).toISOString()};S.boostLog.push(hoje());audit('app','🌧️ Era bom que chovesse: +25% por 24 h','boost',{pct:25});enviarComando({acao:'boost',pct:25});fecharModal();toast('🌧️ +25% ativado por 24 horas!')">🌧️ Mais água (+25% por 24 horas)</button>
+      <button class="btn ${atual === 50 ? 'primary' : ''} full" onclick="S.boost={pct:50,until:new Date(Date.now()+86400e3).toISOString()};S.boostLog.push(hoje());audit('app','🌧️ Era bom que chovesse: +50% por 24 h','boost',{pct:50});enviarComando({acao:'boost',pct:50});fecharModal();toast('⛈️ +50% ativado por 24 horas!')">⛈️ Bastante água (+50% por 24 horas)</button>
+      ${atual > 0 ? `<button class="btn danger full" onclick="cancelarBoost();fecharModal()">✕ Cancelar reforço (+${atual}%)</button>` : ''}
+      <button class="btn full" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
+}
+
+function abrirChuva() {
+  const hojeMm = S.chuvaLocal[hoje()] || 0;
+  abrirModal(`
+    <h3>☔ "Choveu aqui"</h3>
+    <p class="t14 ink2">Caiu uma chuva no sítio? Anote aqui para o sistema descontar essa água e economizar a caixa de 5.000 L.</p>
+    ${hojeMm > 0 ? `
+      <div class="alert good">
+        <span class="ic">✅</span>
+        <div style="flex:1">
+          Já anotado hoje: <b>${hojeMm} mm</b> de chuva.
+          <div style="margin-top:6px">
+            <button class="btn danger sm" onclick="cancelarChuvaHoje();fecharModal()">✕ Desfazer registro de chuva</button>
+          </div>
+        </div>
+      </div>` : ''}
+    <div style="display:grid;gap:8px;margin-top:14px">
+      <button class="btn primary full" onclick="choveuAqui(5,'app');fecharModal();toast('☔ +5 mm anotados!')">🌦️ Chuva fraca (~5 mm · só apagou a poeira)</button>
+      <button class="btn primary full" onclick="choveuAqui(15,'app');fecharModal();toast('☔ +15 mm anotados!')">🌧️ Chuva boa (~15 mm · molhou bem a terra)</button>
+      <button class="btn primary full" onclick="choveuAqui(30,'app');fecharModal();toast('☔ +30 mm anotados!')">⛈️ Chuva forte (~30 mm · lavou tudo)</button>
+      <button class="btn full" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
+}
+
+/* ============================================================================
+ * 3. DETALHES E HIDRÁULICA DA ZONA POR METROS DE FITA DE GOTEJAMENTO
+ * ========================================================================== */
+function salvarHidraulicaFita(i, campo, valor) {
+  if (S.ui.locked) {
+    toast('🔒 Destrave o cadeado no topo para alterar as medidas.');
+    return;
+  }
+  const z = S.zones[i];
+  const num = Number(valor);
+  if (!num || num <= 0) return;
+  if (campo === 'tape_meters') z.tape_meters = C.clamp(Math.round(num), 10, 2000);
+  if (campo === 'emitter_spacing_cm') {
+    z.emitter_spacing_cm = C.clamp(Math.round(num), 10, 100);
+    z.emitter_spacing_m = z.emitter_spacing_cm / 100;
+  }
+  if (campo === 'emitter_flow_lph') {
+    z.emitter_flow_lph = C.clamp(Number(num.toFixed(2)), 0.2, 10);
+    z.emitter_q_lph = z.emitter_flow_lph;
+  }
+  // Quando o usuário altera a fita/gotejador, usa a nova vazão calculada pela fita
+  z.flow_cal_lpm = 0;
+  const g = C.geometria(z, S.soil);
+  audit('app', `📏 Zona ${z.id}: ${g.metros}m de fita · furos a ${g.espacamentoCm}cm · ${g.vazaoFuroLph} L/h → ${Math.round(g.vazaoLph)} L/h`, 'config');
+  salvar();
+  render();
+  abrirZona(i);
+}
+
+function abrirZona(i) {
+  const z = S.zones[i];
+  const P = planos();
+  const d = P.pHoje.porZona[i];
+  const cd = d.cd;
+  const g = C.geometria(z, S.soil);
+  const dis = S.ui.locked ? 'disabled style="opacity:.55"' : '';
+
+  abrirModal(`
+    <h3>${cd ? cd.crop.emoji : '🟫'} ${esc(z.nome)}</h3>
+    <p class="t14 mute">${cd ? `${cd.crop.nome} (${cd.crop.familia}) · Dia ${cd.dap} de ${cd.ciclo} · ${cd.nomeFase}` : 'Zona sem cultura ativa'}</p>
+    ${avisoCadeado()}
+
+    <!-- 1. Metragem da Fita de Gotejamento -->
+    <div class="field">
+      <label>📏 Metragem total de fita de gotejamento na zona (<b>${g.metros} metros</b>)</label>
+      <div class="chips" style="margin-bottom:7px">
+        ${[60, 80, 100, 120, 160, 200].map((m) => `
+          <button ${dis} class="chip ${g.metros === m ? 'sel' : ''}" onclick="salvarHidraulicaFita(${i},'tape_meters',${m})">${m} m</button>
+        `).join('')}
+      </div>
+      <input ${dis} type="number" step="5" min="10" max="2000" value="${g.metros}" onchange="salvarHidraulicaFita(${i},'tape_meters',this.value)" placeholder="Metros totais de fita (ex: 100)" />
+    </div>
+
+    <!-- 2. Espaçamento entre Gotejadores -->
+    <div class="field">
+      <label>📍 Espaçamento entre gotejadores na fita (<b>a cada ${g.espacamentoCm} cm</b>)</label>
+      <div class="seg">
+        ${[20, 30, 40, 50].map((cm) => `
+          <button ${dis} class="${g.espacamentoCm === cm ? 'sel' : ''}" onclick="salvarHidraulicaFita(${i},'emitter_spacing_cm',${cm})">${cm} cm</button>
+        `).join('')}
+      </div>
+    </div>
+
+    <!-- 3. Vazão por Hora de Cada Gotejador -->
+    <div class="field">
+      <label>💧 Vazão de cada gotejador (<b>${g.vazaoFuroLph} L/hora por furo</b>)</label>
+      <div class="chips" style="margin-bottom:7px">
+        ${[
+          { v: 0.8, lbl: '0,8 L/h (gravidade baixa)' },
+          { v: 1.2, lbl: '1,2 L/h (gravidade padrão)' },
+          { v: 1.6, lbl: '1,6 L/h (nominal)' },
+          { v: 2.0, lbl: '2,0 L/h' },
+        ].map((op) => `
+          <button ${dis} class="chip ${Math.abs(g.vazaoFuroLph - op.v) < 0.05 ? 'sel' : ''}" onclick="salvarHidraulicaFita(${i},'emitter_flow_lph',${op.v})">${op.lbl}</button>
+        `).join('')}
+      </div>
+      <input ${dis} type="number" step="0.1" min="0.3" max="8" value="${g.vazaoFuroLph}" onchange="salvarHidraulicaFita(${i},'emitter_flow_lph',this.value)" placeholder="Vazão L/h de cada gotejador" />
+    </div>
+
+    <!-- Resumo Hidráulico Calculado pela Fita -->
+    <div class="card" style="margin-top:12px;background:var(--sub);padding:12px 14px">
+      <div class="t12 mute b" style="text-transform:uppercase;margin-bottom:6px">🚰 Volume de Saída Calculado da Zona ${z.id}</div>
+      <div class="list t14">
+        <div class="li"><span>Total de gotejadores (${g.metros}m ÷ ${g.espacamentoCm}cm)</span><b>${g.gotejadores} gotejadores</b></div>
+        <div class="li"><span>Saída por hora da zona</span><b style="color:var(--blue)">${Math.round(d.vazaoLph).toLocaleString('pt-BR')} L/hora</b></div>
+        <div class="li"><span>Saída por minuto</span><b>${d.vazaoLpm.toFixed(1)} L/min</b></div>
+      </div>
+    </div>
+
+    <!-- 4. Palhada e Ajuste Fino Permanente -->
+    <div class="field">
+      <label>🌾 Cobertura morta no solo (Palhada)</label>
+      <div class="seg">
+        <button ${dis} class="${!z.mulch ? 'sel' : ''}" onclick="if(!S.ui.locked){S.zones[${i}].mulch=false;salvar();render();abrirZona(${i});}">Terra descoberta</button>
+        <button ${dis} class="${z.mulch ? 'sel' : ''}" onclick="if(!S.ui.locked){S.zones[${i}].mulch=true;audit('app','🌾 Palhada ativada na Zona ${z.id}','config');salvar();render();abrirZona(${i});}">🌾 Com palhada (−15% água)</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>🎛️ Ajuste fino permanente da zona (${z.fine_pct >= 0 ? '+' : ''}${z.fine_pct || 0}%)</label>
+      <div class="seg">
+        ${[-20, -10, 0, 10, 20].map((v) => `<button ${dis} class="${(z.fine_pct || 0) === v ? 'sel' : ''}" onclick="if(!S.ui.locked){S.zones[${i}].fine_pct=${v};audit('app','Zona ${z.id}: ajuste fino ${v > 0 ? '+' + v : v}%','config');salvar();render();abrirZona(${i});}">${v > 0 ? '+' + v : v}%</button>`).join('')}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+      <button class="btn" onclick="abrirGuiaCulturas(${i})">📖 Guia & Espaçamentos</button>
+      <button class="btn primary" onclick="abrirPlantio(${i})">🔄 Trocar cultura</button>
+    </div>
+    <button class="btn full" style="margin-top:10px" onclick="fecharModal()">Fechar</button>
+  `);
+}
+
+/* ============================================================================
+ * 4. GUIA DE CULTURAS & ESPAÇAMENTOS (CONSULTA 100% SEGURA — NÃO APAGA SAFRA!)
+ * ========================================================================== */
+function abrirGuiaCulturas(i, cropIdSel) {
+  const z = S.zones[i];
+  const famAtual = (z.crop && C.CROPS[z.crop.id] ? C.CROPS[z.crop.id].familia : z.crop?.anterior) || 'Leguminosas';
+  const recomendadas = C.sugerirRotacao(famAtual);
+  const cid = cropIdSel || recomendadas[0]?.id || 'feijao_verde';
+  const c = C.CROPS[cid];
+  const prev = C.previaSafra(z, S.soil, cid, hoje());
+  const ehRecomendada = c.familia !== famAtual;
+
+  abrirModal(`
+    <div class="row between" style="margin-bottom:6px">
+      <span class="pill green">📖 Modo Consulta Segura</span>
+      <span class="t12 mute">Não altera sua safra atual</span>
+    </div>
+    <h3>📖 Culturas Possíveis & Espaçamentos</h3>
+    <p class="t13 ink2">
+      Consulte com calma o <b>espaçamento mínimo entre ruas (fitas)</b>, <b>espaçamento entre plantas</b> e preparo do solo para se planejar antes da próxima safra na <b>${esc(z.nome.split('—')[0].trim())}</b>.
+    </p>
+
+    <div class="field">
+      <label>Toque em uma cultura para ver o preparo e espaçamento:</label>
+      <div class="chips">
+        ${Object.entries(C.CROPS).map(([id, cr]) => {
+          const boaRotacao = cr.familia !== famAtual;
+          return `<button class="chip ${id === cid ? 'sel' : ''}" onclick="abrirGuiaCulturas(${i},'${id}')">${cr.emoji} ${cr.nome}${boaRotacao ? '' : ' ⚠️'}</button>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- Ficha Técnica de Preparo e Espaçamento da Cultura Selecionada -->
+    <div class="card" style="margin-top:12px;background:var(--sub);padding:14px 16px">
+      <div class="row between">
+        <div style="font-size:17px;font-weight:850">${c.emoji} ${esc(c.nome)} <span class="t12 mute">(${esc(c.familia)})</span></div>
+        <span class="pill ${ehRecomendada ? 'green' : 'amber'}">${ehRecomendada ? '✅ Ótima rotação' : '⚠️ Mesma família'}</span>
+      </div>
+
+      <div class="shifts-grid" style="margin-top:10px">
+        <div class="shift-box" style="background:var(--card)">
+          <div class="t12 mute b">↔️ ESPAÇAMENTO DA RUA</div>
+          <div class="t14 b" style="margin-top:3px;color:var(--blue)">${esc(c.espacamento_ruas_m || '1,0 m')}</div>
+          <div class="t12 mute" style="margin-top:2px">Distância mínima entre fitas</div>
+        </div>
+        <div class="shift-box" style="background:var(--card)">
+          <div class="t12 mute b">🌱 ENTRE PLANTAS / COVAS</div>
+          <div class="t14 b" style="margin-top:3px;color:var(--green)">${esc(c.espacamento_plantas_m || '0,30 m')}</div>
+          <div class="t12 mute" style="margin-top:2px">Ao longo da linha de gotejo</div>
+        </div>
+      </div>
+
+      <div class="list t13" style="margin-top:10px">
+        <div class="li"><span>⏳ Duração média do ciclo</span><b>${prev.ciclo} dias</b></div>
+        <div class="li"><span>💧 Consumo médio na zona</span><b>~${fmtL(prev.totalL / prev.ciclo)}/dia (pico ${fmtL(prev.picoLDia)}/dia)</b></div>
+        <div class="li"><span>🚜 Preparo recomendado</span><b style="text-align:right;max-width:62%">${esc(c.preparo || 'Canteiro adubado com fita central')}</b></div>
+        <div class="li"><span>🧺 Ponto de colheita</span><b style="text-align:right;max-width:62%">${esc(c.colheita)}</b></div>
+        ${c.reta_final ? `
+          <div class="li">
+            <span>🍯 Restrição hídrica final</span>
+            <b style="text-align:right;max-width:62%;color:var(--amber)">Nos últimos ${c.reta_final.dias}d reduz rega p/ ${esc(c.reta_final.motivo)}</b>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+
+    <div style="display:grid;gap:8px;margin-top:14px">
+      <button class="btn full" onclick="fecharModal()">✅ Fechar guia (manter safra atual intacta)</button>
+      <button class="btn sm" style="color:var(--amber);border-color:var(--amber-bd)" onclick="abrirPlantio(${i},'${cid}')">
+        Já colhi e quero substituir a cultura desta zona →
+      </button>
+    </div>
+  `);
+}
+
+/* ============================================================================
+ * 5. TROCAR CULTURA COM DUPLA CONFIRMAÇÃO EXPLÍCITA (EVITA PERDA ACIDENTAL)
+ * ========================================================================== */
+function executarTrocaCulturaConfirmada(i, cid, dt, famAnterior) {
+  if (S.ui.locked) {
+    toast('🔒 Destrave o cadeado no topo para confirmar a troca.');
+    return;
+  }
+  const z = S.zones[i];
+  const antiga = z.crop && C.CROPS[z.crop.id] ? C.CROPS[z.crop.id].nome : 'anterior';
+  z.enabled = true;
+  z.crop = { id: cid, plantio: dt, anterior: famAnterior };
+  z.restricao_modo = 'auto';
+  z.Dr_mm = 1.0;
+  audit('app', `🔄 Confirmou troca de cultura na Zona ${z.id}: encerrou ${antiga} → plantou ${C.CROPS[cid].emoji} ${C.CROPS[cid].nome}`, 'config');
+  salvar();
+  render();
+  fecharModal();
+  toast(`🌱 Troca confirmada: ${C.CROPS[cid].nome} ativo na Zona ${z.id}!`);
+}
+
+function abrirPlantio(i, cropIdSel, dataSel, pedirConfirmacao = false) {
+  const z = S.zones[i];
+  const temCulturaAtiva = !!(z.enabled && z.crop && z.crop.id && C.CROPS[z.crop.id]);
+  const cropAtual = temCulturaAtiva ? C.CROPS[z.crop.id] : null;
+  const dapAtual = temCulturaAtiva ? (C.daysBetween(z.crop.plantio, hoje()) + 1) : 0;
+  const cicloAtual = cropAtual ? cropAtual.dias.reduce((a, b) => a + b, 0) : 0;
+
+  const famAnterior = (cropAtual ? cropAtual.familia : z.crop?.anterior) || 'Leguminosas';
+  const recomendadas = C.sugerirRotacao(famAnterior);
+  const cid = cropIdSel || recomendadas[0]?.id || 'feijao_verde';
+  const cNova = C.CROPS[cid];
+  const dt = dataSel || hoje();
+  const prev = C.previaSafra(z, S.soil, cid, dt);
+
+  abrirModal(`
+    <div class="row between" style="margin-bottom:4px">
+      <h3>🔄 ${temCulturaAtiva ? 'Trocar Cultura da Zona' : 'Cadastrar Cultura'} · Zona ${z.id}</h3>
+      <button class="btn sm" onclick="abrirGuiaCulturas(${i},'${cid}')">📖 Só consultar guia</button>
+    </div>
+
+    ${temCulturaAtiva ? `
+      <div class="alert warn" style="margin-top:6px">
+        <span class="ic">⚠️</span>
+        <div>
+          <b>Safra em andamento: ${cropAtual.emoji} ${esc(cropAtual.nome)} (Dia ${dapAtual} de ${cicloAtual}).</b>
+          <div class="t12" style="margin-top:2px">
+            Use esta tela <b>apenas quando já tiver colhido</b> e for realmente iniciar a nova cultura. Para apenas planejar ou ver espaçamentos sem apagar a safra atual, toque em <b>"📖 Só consultar guia"</b> acima.
+          </div>
+        </div>
+      </div>
+    ` : ''}
+
+    ${avisoCadeado()}
+
+    <div class="field">
+      <label>1. Escolha a nova cultura para plantar agora</label>
+      <div class="chips">
+        ${Object.entries(C.CROPS).map(([id, c]) => {
+          const rec = c.familia !== famAnterior;
+          return `<button class="chip ${id === cid ? 'sel' : ''}" onclick="abrirPlantio(${i},'${id}','${dt}',false)">${c.emoji} ${c.nome}${rec ? '' : ' ⚠️'}</button>`;
+        }).join('')}
+      </div>
+      <div class="t12 mute" style="margin-top:6px">
+        ${cNova.familia === famAnterior
+          ? `⚠️ Atenção: ${cNova.nome} repete a família <b>${famAnterior}</b> na mesma zona.`
+          : `✅ Boa rotação (${cNova.familia}): ${C.sugerirRotacao(famAnterior).find((x) => x.id === cid)?.motivo || 'descansa a terra'}.`}
+      </div>
+    </div>
+
+    <div class="field">
+      <label>2. Data do plantio da nova safra</label>
+      <input type="date" value="${dt}" onchange="abrirPlantio(${i},'${cid}',this.value,false)" />
+    </div>
+
+    <!-- Resumo + Espaçamentos Mínimos da Nova Cultura -->
+    <div class="card" style="margin-top:12px;background:var(--sub);padding:12px 14px">
+      <div class="t12 mute b" style="text-transform:uppercase;margin-bottom:6px">📐 Espaçamento & Ciclo de ${cNova.emoji} ${cNova.nome}</div>
+      <div class="list t13">
+        <div class="li"><span>↔️ Espaçamento mínimo da rua</span><b>${esc(cNova.espacamento_ruas_m || '1,0 m')}</b></div>
+        <div class="li"><span>🌱 Espaçamento entre plantas</span><b>${esc(cNova.espacamento_plantas_m || '0,30 m')}</b></div>
+        <div class="li"><span>⏳ Ciclo até a colheita</span><b>${prev.ciclo} dias (~${fmtData(prev.colheita)})</b></div>
+        <div class="li"><span>💧 Consumo total estimado</span><b>${fmtL(prev.totalL)}</b></div>
+      </div>
+    </div>
+
+    <!-- Passo de Dupla Confirmação Explícita ("Confirmar troca de cultura") -->
+    ${pedirConfirmacao ? `
+      <div class="card" style="margin-top:14px;background:var(--red-bg);border:2px solid var(--red-bd);padding:14px 16px">
+        <div class="t14 b" style="color:var(--red)">🛑 Confirmar Troca de Cultura?</div>
+        <p class="t13 ink2" style="margin-top:4px">
+          Ao confirmar, a safra atual de <b>${cropAtual ? cropAtual.nome : 'cultura anterior'} (Dia ${dapAtual})</b> será encerrada e substituída imediatamente por <b>${cNova.emoji} ${cNova.nome}</b> (plantio em ${fmtData(dt)}).
+        </p>
+        <div style="display:grid;gap:8px;margin-top:12px">
+          <button class="btn primary full" onclick="executarTrocaCulturaConfirmada(${i},'${cid}','${dt}','${famAnterior}')">
+            ✅ Sim, Confirmar Troca de Cultura
+          </button>
+          <button class="btn full" style="background:var(--card)" onclick="abrirPlantio(${i},'${cid}','${dt}',false)">
+            ⬅️ Não, voltar sem trocar
+          </button>
+        </div>
+      </div>
+    ` : `
+      <div style="display:grid;gap:8px;margin-top:14px">
+        ${temCulturaAtiva ? `
+          <button class="btn primary full" onclick="if(S.ui.locked){toast('🔒 Destrave o cadeado acima primeiro.');return;} abrirPlantio(${i},'${cid}','${dt}',true)">
+            🔄 Preparar Troca para ${cNova.nome}...
+          </button>
+        ` : `
+          <button class="btn primary full" onclick="executarTrocaCulturaConfirmada(${i},'${cid}','${dt}','${famAnterior}')">
+            ✅ Confirmar Plantio de ${cNova.nome}
+          </button>
+        `}
+        <button class="btn full" onclick="fecharModal()">Cancelar (Manter safra atual)</button>
+      </div>
+    `}
+  `);
+}
+
+/* ============================================================================
+ * 6. CONSULTOR CLAUDE IA (SINTOMAS RÁPIDOS + YAML)
+ * ========================================================================== */
+function alternarSintoma(id) {
+  if (sintomasSelecionados.includes(id)) sintomasSelecionados = sintomasSelecionados.filter((x) => x !== id);
+  else sintomasSelecionados.push(id);
+  abrirClaude();
+}
+
+async function compartilharYamlComClaude() {
+  const P = planos();
+  const yamlStr = Y.gerarYaml(S, P.pHoje, { sintomas: sintomasSelecionados, relato: relatoClaudeTexto });
+  const blob = new Blob([yamlStr], { type: 'text/yaml;charset=utf-8' });
+  const file = new File([blob], 'plano_irrigacao_sitio.yaml', { type: 'text/yaml' });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        title: 'Irriga.ai Pro-Duo — Plano YAML',
+        text: relatoClaudeTexto || 'Analise o arquivo plano_irrigacao_sitio.yaml do meu sítio.',
+        files: [file],
+      });
+      audit('claude', '📤 Arquivo .yaml compartilhado com o Claude', 'claude');
+      return;
+    } catch (e) {}
+  }
+
+  try { await navigator.clipboard.writeText(yamlStr); } catch (e) {}
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'plano_irrigacao_sitio.yaml';
+  a.click();
+  toast('📥 Arquivo .yaml baixado e copiado!');
+}
+
+function aplicarRespostaClaude() {
+  const txt = document.getElementById('claude-yaml-in')?.value || '';
+  const res = Y.importarYaml(txt, S);
+  if (!res.ok) { toast('⚠️ ' + res.erros[0]); return; }
+  S = Object.assign(S, res.state);
+  audit('claude', `🧠 Ajuste do Claude aplicado (${res.mudancas.join(', ') || 'revisão'})`, 'claude');
+  salvar(); render(); fecharModal();
+  toast(`✅ Ajustes do Claude aplicados!`);
+}
+
+function abrirClaude() {
+  abrirModal(`
+    <h3>🤖 Consultar o Claude IA</h3>
+    <p class="t14 ink2">Toque nos sintomas abaixo se notou algo diferente na planta e envie o arquivo <code>.yaml</code> para o Claude analisar.</p>
+
+    <div class="field">
+      <label>O que você observou na planta? (opcional)</label>
+      <div class="chips">
+        ${Y.SINTOMAS_RAPIDOS.map((s) => `
+          <button class="chip ${sintomasSelecionados.includes(s.id) ? 'sel' : ''}" onclick="alternarSintoma('${s.id}')">${s.emoji} ${esc(s.label)}</button>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Observação ou pergunta</label>
+      <input type="text" placeholder="Ex: Quero trocar a Zona 1 para feijão verde..." value="${esc(relatoClaudeTexto)}" oninput="relatoClaudeTexto=this.value" />
+    </div>
+
+    <button class="btn primary full" style="margin-top:12px" onclick="compartilharYamlComClaude()">📤 Compartilhar .YAML c/ Claude</button>
+
+    <div class="field" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
+      <div class="row between" style="margin-bottom:6px">
+        <label style="margin:0">Receber resposta do Claude</label>
+        <button class="btn sm" onclick="document.getElementById('yaml-file').click()">📂 Abrir arquivo .yaml</button>
+      </div>
+      <textarea id="claude-yaml-in" rows="3" placeholder="Ou cole aqui o bloco YAML que o Claude respondeu..."></textarea>
+      <button class="btn blue full" style="margin-top:8px" onclick="aplicarRespostaClaude()">📥 Aplicar Ajuste do Claude</button>
+    </div>
+
+    <button class="btn full" style="margin-top:10px" onclick="fecharModal()">Fechar</button>
+  `);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const inp = document.getElementById('yaml-file');
+  if (inp) {
+    inp.addEventListener('change', async (ev) => {
+      const f = ev.target.files?.[0];
+      if (!f) return;
+      const txt = await f.text();
+      const res = Y.importarYaml(txt, S);
+      if (!res.ok) { toast('⚠️ ' + res.erros[0]); return; }
+      S = Object.assign(S, res.state);
+      audit('claude', `📂 Arquivo ${f.name} importado`, 'claude');
+      salvar(); render(); fecharModal();
+      toast(`✅ Arquivo ${f.name} aplicado!`);
+      inp.value = '';
+    });
+  }
+});
+
+/* ============================================================================
+ * 7. AJUSTES GERAIS DO SISTEMA (SIMPLES E DIRETO)
+ * ========================================================================== */
+function abrirAjustes() {
+  const dis = S.ui.locked ? 'disabled style="opacity:.55"' : '';
+  abrirModal(`
+    <h3>⚙️ Ajustes do Sítio</h3>
+    ${avisoCadeado()}
+
+    <div class="field">
+      <label>Aparência da tela</label>
+      <div class="seg">
+        <button class="${!S.ui.dark ? 'sel' : ''}" onclick="S.ui.dark=false;salvar();render();abrirAjustes()">☀️ Tema Claro (Sol)</button>
+        <button class="${S.ui.dark ? 'sel' : ''}" onclick="S.ui.dark=true;salvar();render();abrirAjustes()">🌙 Modo Noite</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="field">
+        <label>Cota diária máxima (L)</label>
+        <input ${dis} type="number" step="50" min="100" max="5000" value="${S.quota.daily_L}" onchange="S.quota.daily_L=C.clamp(Number(this.value),100,5000);audit('app','Cota: '+S.quota.daily_L+' L','config');salvar();render()" />
+      </div>
+      <div class="field">
+        <label>Água na caixa 5.000 L</label>
+        <input ${dis} type="number" step="100" min="0" max="5000" value="${Math.round(S.tank.level_L)}" onchange="S.tank.level_L=C.clamp(Number(this.value),0,5000);salvar();render()" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Tipo de terra do sítio</label>
+      <select ${dis} onchange="S.soil=this.value;audit('app','Solo: '+this.value,'config');salvar();render()">
+        ${Object.entries(C.SOLOS).map(([k, v]) => `<option value="${k}" ${S.soil === k ? 'selected' : ''}>${v.nome}</option>`).join('')}
+      </select>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+      <a class="btn" href="./dev-gui.html" style="text-decoration:none">🛠️ Bancada de Testes</a>
+      <button class="btn danger" ${dis} onclick="if(!S.ui.locked && confirm('Restaurar o estado inicial de fábrica?')){localStorage.removeItem(KEY);S=novoEstado();salvar();render();fecharModal();toast('Sistema restaurado!')}">♻️ Restaurar padrão</button>
+    </div>
+    <button class="btn full" style="margin-top:10px" onclick="fecharModal()">Fechar</button>
+  `);
+}

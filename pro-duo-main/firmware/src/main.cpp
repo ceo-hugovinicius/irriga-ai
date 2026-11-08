@@ -463,6 +463,82 @@ void desenharOled() {
     display.display();
 }
 
+void fecharTodasValvulas();
+void abrirZonaFila(uint8_t idx, float litrosAlvo);
+void recalcularPlanoDoDia();
+void publicarStatusMqtt();
+
+void executarComandoGeral(JsonDocument& doc) {
+    String acao = doc["acao"] | "";
+    if (acao == "pausar") {
+        uint32_t h = doc["horas"] | 0;
+        isPaused = true;
+        pauseIndefinite = (h == 0);
+        pauseUntilMs = millis() + h * 3600UL * 1000UL;
+        fecharTodasValvulas();
+        beep(80, 2);
+    } else if (acao == "retomar") {
+        isPaused = false;
+        pauseIndefinite = false;
+        hydraulicLockAlert = false;
+        beep(80, 1);
+    } else if (acao == "regar_agora" || acao == "override_regar_agora") {
+        if (doc["zonas"].is<JsonArray>()) {
+            JsonArray zs = doc["zonas"].as<JsonArray>();
+            // Zera fila anterior para eliminar resíduos de comandos anteriores
+            queueLiters[0] = 0.0f;
+            queueLiters[1] = 0.0f;
+            uint8_t primeiroIdx = 0;
+            bool temPrimeiro = false;
+
+            for (JsonObject zo : zs) {
+                int id = zo["zona"] | 0;
+                float lit = zo["litros"] | 0.0f;
+                if (id >= 1 && id <= 2 && lit >= 1.0f) {
+                    queueLiters[id - 1] = lit;
+                    if (!temPrimeiro) {
+                        primeiroIdx = id - 1;
+                        temPrimeiro = true;
+                    }
+                }
+            }
+            isPaused = false;
+            pauseIndefinite = false;
+            if (temPrimeiro && queueLiters[primeiroIdx] >= 2.0f) {
+                fecharTodasValvulas();
+                float l = queueLiters[primeiroIdx];
+                queueLiters[primeiroIdx] = 0.0f;
+                abrirZonaFila(primeiroIdx, l);
+            }
+        } else {
+            enfileirarOverrideFlex1Hora();
+        }
+        beep(120, 2);
+    } else if (acao == "parar_rega" || acao == "cancelar_override") {
+        queueLiters[0] = 0.0f;
+        queueLiters[1] = 0.0f;
+        fecharTodasValvulas();
+        beep(80, 2);
+    } else if (acao == "remover_fila") {
+        int id = doc["zona"] | 0;
+        if (id >= 1 && id <= 2) {
+            queueLiters[id - 1] = 0.0f;
+        }
+        beep(50, 1);
+    } else if (acao == "boost") {
+        boostPct = doc["pct"] | 0;
+        boostUntilMs = boostPct > 0 ? (millis() + 24UL * 3600UL * 1000UL) : 0;
+        recalcularPlanoDoDia();
+        beep(60, 1);
+    } else if (acao == "chuva_local") {
+        float mm = doc["mm"] | 0.0f;
+        for (int i = 0; i < 2; i++) zones[i].Dr_mm = max(0.0f, zones[i].Dr_mm - chuvaEfetiva(mm));
+        fecharTodasValvulas();
+        recalcularPlanoDoDia();
+        beep(100, 3);
+    }
+}
+
 // --- Endpoints HTTP REST para Sincronia com o Web-App ---
 void configurarRotasHttp() {
     // Inicializa a pilha de rede WiFi (SoftAP + Cliente Wokwi) antes de ligar o servidor HTTP
@@ -474,13 +550,16 @@ void configurarRotasHttp() {
 
     server.on("/api/status", HTTP_GET, []() {
         JsonDocument doc;
-        doc["v"]          = "1.5-argon";
+        doc["v"]          = "1.6-argon";
         doc["tank_L"]     = lerCaixaLitros();
         doc["filter_pct"] = filter_health_pct;
         doc["flow_lpm"]   = currentFlowLpm;
         doc["paused"]     = isPaused;
         doc["boost_pct"]  = boostPct;
         doc["active_zone"]= activeZoneIdx >= 0 ? (activeZoneIdx + 1) : 0;
+        doc["active_rem_L"]= activeZoneIdx >= 0 ? max(0.0f, activeTargetLiters - (zones[activeZoneIdx].delivered_today_L - activeStartLiters)) : 0.0f;
+        doc["queue_z1_L"] = queueLiters[0];
+        doc["queue_z2_L"] = queueLiters[1];
         doc["alert"]      = lastAlertMsg;
         String out;
         serializeJson(doc, out);
@@ -523,47 +602,8 @@ void configurarRotasHttp() {
             server.send(400, "application/json", "{\"ok\":false}");
             return;
         }
-        String acao = doc["acao"] | "";
-        if (acao == "pausar") {
-            uint32_t h = doc["horas"] | 0;
-            isPaused = true;
-            pauseIndefinite = (h == 0);
-            pauseUntilMs = millis() + h * 3600UL * 1000UL;
-            fecharTodasValvulas();
-        } else if (acao == "retomar") {
-            isPaused = false;
-            pauseIndefinite = false;
-            hydraulicLockAlert = false;
-        } else if (acao == "regar_agora" || acao == "override_regar_agora") {
-            if (doc["zonas"].is<JsonArray>()) {
-                JsonArray zs = doc["zonas"].as<JsonArray>();
-                for (JsonObject zo : zs) {
-                    int id = zo["zona"] | 0;
-                    float lit = zo["litros"] | 0.0f;
-                    if (id >= 1 && id <= 2 && lit > 1.0f) {
-                        queueLiters[id - 1] += lit;
-                    }
-                }
-                isPaused = false;
-                pauseIndefinite = false;
-                if (activeZoneIdx < 0 && queueLiters[0] >= 2.0f) {
-                    float l = queueLiters[0]; queueLiters[0] = 0; abrirZonaFila(0, l);
-                } else if (activeZoneIdx < 0 && queueLiters[1] >= 2.0f) {
-                    float l = queueLiters[1]; queueLiters[1] = 0; abrirZonaFila(1, l);
-                }
-            } else {
-                enfileirarOverrideFlex1Hora();
-            }
-        } else if (acao == "boost") {
-            boostPct = doc["pct"] | 0;
-            boostUntilMs = boostPct > 0 ? (millis() + 24UL * 3600UL * 1000UL) : 0;
-            recalcularPlanoDoDia();
-        } else if (acao == "chuva_local") {
-            float mm = doc["mm"] | 0.0f;
-            for (int i = 0; i < 2; i++) zones[i].Dr_mm = max(0.0f, zones[i].Dr_mm - chuvaEfetiva(mm));
-            fecharTodasValvulas();
-            recalcularPlanoDoDia();
-        }
+        executarComandoGeral(doc);
+        publicarStatusMqtt();
         server.send(200, "application/json", "{\"ok\":true}");
     });
 
@@ -574,13 +614,16 @@ void configurarRotasHttp() {
 void publicarStatusMqtt() {
     if (!mqttClient.connected()) return;
     JsonDocument doc;
-    doc["v"]          = "1.5-argon";
+    doc["v"]          = "1.6-argon";
     doc["tank_L"]     = lerCaixaLitros();
     doc["filter_pct"] = filter_health_pct;
     doc["flow_lpm"]   = currentFlowLpm;
     doc["paused"]     = isPaused;
     doc["boost_pct"]  = boostPct;
     doc["active_zone"]= activeZoneIdx >= 0 ? (activeZoneIdx + 1) : 0;
+    doc["active_rem_L"]= activeZoneIdx >= 0 ? max(0.0f, activeTargetLiters - (zones[activeZoneIdx].delivered_today_L - activeStartLiters)) : 0.0f;
+    doc["queue_z1_L"] = queueLiters[0];
+    doc["queue_z2_L"] = queueLiters[1];
     doc["alert"]      = lastAlertMsg;
     String out;
     serializeJson(doc, out);
@@ -596,52 +639,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     if (deserializeJson(doc, body)) return;
 
     if (String(topic) == MQTT_TOPIC_CMD) {
-        String acao = doc["acao"] | "";
-        if (acao == "pausar") {
-            uint32_t h = doc["horas"] | 0;
-            isPaused = true;
-            pauseIndefinite = (h == 0);
-            pauseUntilMs = millis() + h * 3600UL * 1000UL;
-            fecharTodasValvulas();
-            beep(80, 2);
-        } else if (acao == "retomar") {
-            isPaused = false;
-            pauseIndefinite = false;
-            hydraulicLockAlert = false;
-            beep(80, 1);
-        } else if (acao == "regar_agora" || acao == "override_regar_agora") {
-            if (doc["zonas"].is<JsonArray>()) {
-                JsonArray zs = doc["zonas"].as<JsonArray>();
-                for (JsonObject zo : zs) {
-                    int id = zo["zona"] | 0;
-                    float lit = zo["litros"] | 0.0f;
-                    if (id >= 1 && id <= 2 && lit > 1.0f) {
-                        queueLiters[id - 1] += lit;
-                    }
-                }
-                isPaused = false;
-                pauseIndefinite = false;
-                if (activeZoneIdx < 0 && queueLiters[0] >= 2.0f) {
-                    float l = queueLiters[0]; queueLiters[0] = 0; abrirZonaFila(0, l);
-                } else if (activeZoneIdx < 0 && queueLiters[1] >= 2.0f) {
-                    float l = queueLiters[1]; queueLiters[1] = 0; abrirZonaFila(1, l);
-                }
-            } else {
-                enfileirarOverrideFlex1Hora();
-            }
-            beep(120, 2);
-        } else if (acao == "boost") {
-            boostPct = doc["pct"] | 0;
-            boostUntilMs = boostPct > 0 ? (millis() + 24UL * 3600UL * 1000UL) : 0;
-            recalcularPlanoDoDia();
-            beep(60, 1);
-        } else if (acao == "chuva_local") {
-            float mm = doc["mm"] | 0.0f;
-            for (int i = 0; i < 2; i++) zones[i].Dr_mm = max(0.0f, zones[i].Dr_mm - chuvaEfetiva(mm));
-            fecharTodasValvulas();
-            recalcularPlanoDoDia();
-            beep(100, 3);
-        }
+        executarComandoGeral(doc);
         publicarStatusMqtt();
     } else if (String(topic) == MQTT_TOPIC_PLAN) {
         if (doc["quota_L"].is<float>()) daily_quota_L = doc["quota_L"].as<float>();

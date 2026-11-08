@@ -27,15 +27,15 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); defe
 
 function novoEstado() {
   const base = C.estadoPadrao();
-  base.versao = '1.5.2-argon';
-  // Datas relativas a hoje para que a Zona 1 esteja em plena produção (Dia 35)
-  // e a Zona 2 (Melancia) esteja na Reta Final de restrição hídrica (Dia 68 de 75)
-  base.zones[0].crop = { id: 'maxixe', plantio: C.addDays(hoje(), -34), anterior: 'Leguminosas' };
-  base.zones[1].crop = { id: 'melancia', plantio: C.addDays(hoje(), -67), anterior: 'Convolvuláceas' };
+  base.versao = '1.6.0-argon';
+  base.zones[0].crop = null;
+  base.zones[1].crop = null;
   return Object.assign(base, {
     historico: [], auditoria: [], pauseLog: [], boostLog: [], chuvaLocal: {}, manual: null,
     weather: { fetched: null, days: [], erro: null }, filtro: { pct: 96 },
-    ui: { locked: true, dark: false }, device: { url: '', online: false, lastSeen: null, status: null },
+    ui: { locked: true, dark: false },
+    security: { pin: '1234', enabled: true },
+    device: { url: '', online: false, lastSeen: null, status: null, telemetry: null },
     ultimoDiaFechado: C.addDays(hoje(), -1),
   });
 }
@@ -51,27 +51,23 @@ function migrarZona(z, idx) {
     z.emitter_flow_lph = z.emitter_q_lph || 1.2;
   }
   if (!z.restricao_modo) z.restricao_modo = 'auto';
-  // Se uma safra padrão antiga já estourou o ciclo há muitos dias, atualiza para demonstrar a safra ativa
-  if (z.crop && z.crop.id && C.CROPS[z.crop.id]) {
-    const ciclo = C.CROPS[z.crop.id].dias.reduce((a, b) => a + b, 0);
-    const dap = C.daysBetween(z.crop.plantio, hoje()) + 1;
-    if (dap > ciclo + 5) {
-      z.crop.plantio = idx === 1 ? C.addDays(hoje(), -(ciclo - 7)) : C.addDays(hoje(), -Math.round(ciclo * 0.5));
-    }
+  if (z.crop && (!z.crop.id || !C.CROPS[z.crop.id])) {
+    z.crop = null;
   }
   return z;
 }
 
 function carregar() {
   try {
-    const raw = localStorage.getItem(KEY) || localStorage.getItem('irriga_argon_v1_5') || localStorage.getItem('irriga_claude_v2');
+    const raw = localStorage.getItem(KEY) || localStorage.getItem('irriga_argon_v1_6') || localStorage.getItem('irriga_argon_v1_5');
     if (raw) {
       const st = Object.assign(novoEstado(), JSON.parse(raw));
-      st.versao = '1.5.2-argon';
+      st.versao = '1.6.0-argon';
       st.zones = (st.zones || []).map((z, i) => migrarZona(z, i));
       if (!st.windows || !st.windows.dawn_start) {
         st.windows = { dawn_start: '04:00', end_dawn: '05:30', evening: '16:00', evening_hot: '16:30', pulse_max_min: 90, gap_min: 5 };
       }
+      if (!st.security) st.security = { pin: '1234', enabled: true };
       st.auditoria = (st.auditoria || []).map((a, idx) => ({
         id: a.id || ('ev_' + (a.ts || Date.now()) + '_' + idx),
         ...a,
@@ -83,6 +79,40 @@ function carregar() {
 }
 function salvar() { localStorage.setItem(KEY, JSON.stringify(S)); }
 window.addEventListener('storage', (e) => { if (e.key === KEY) { S = carregar(); render(); } });
+
+function salvarConfigCloud() {
+  salvar();
+  if (window.MQTT_CLIENT && window.MQTT_CONNECTED) {
+    try {
+      const cfgPayload = {
+        ts: Date.now(),
+        zones: S.zones.map((z) => ({
+          id: z.id,
+          nome: z.nome,
+          crop: z.crop,
+          tape_meters: z.tape_meters,
+          emitter_spacing_cm: z.emitter_spacing_cm,
+          emitter_flow_lph: z.emitter_flow_lph,
+          mulch: z.mulch,
+          fine_pct: z.fine_pct,
+          restricao_modo: z.restricao_modo,
+        })),
+        quota: S.quota,
+        soil: S.soil,
+        site: S.site,
+        security: S.security,
+      };
+      const msg = new Paho.MQTT.Message(JSON.stringify(cfgPayload));
+      msg.destinationName = MQTT_TOPIC_CONFIG;
+      msg.retained = true;
+      msg.qos = 1;
+      window.MQTT_CLIENT.send(msg);
+      console.log('☁️ [MQTT] Configuração retida sincronizada na nuvem!');
+    } catch (e) {
+      console.warn('Erro ao sincronizar config via MQTT:', e);
+    }
+  }
+}
 
 /* ---------------- Utilidades ---------------- */
 function hoje() { return C.isoDate(new Date()); }
@@ -329,8 +359,28 @@ function cancelarRegaManual(ev) {
     S.manual = null;
   }
   S.auditoria = S.auditoria.filter((a) => a.tipo !== 'regar_agora');
+  enviarComando({ acao: 'parar_rega' });
   salvar(); render();
-  toast('✕ Rega manual (override) cancelada!');
+  toast('✕ Rega manual cancelada e válvulas fechadas!');
+}
+
+function removerDaFila(zonaId) {
+  if (S.ui.locked) {
+    solicitarDestravamentoComPin(() => removerDaFila(zonaId));
+    return;
+  }
+  const telemetry = S.device?.telemetry;
+  if (telemetry && telemetry.active_zone === zonaId) {
+    cancelarRegaManual();
+    return;
+  }
+  if (S.manual && Array.isArray(S.manual.eventos)) {
+    S.manual.eventos = S.manual.eventos.filter((e) => e.zona !== zonaId);
+    if (!S.manual.eventos.length) S.manual = null;
+  }
+  enviarComando({ acao: 'remover_fila', zona: zonaId });
+  salvar(); render();
+  toast(`✕ Zona ${zonaId} removida da fila de rega!`);
 }
 
 function cancelarBoost(ev) {
@@ -428,6 +478,7 @@ function limparHistoricoEventos() {
 const MQTT_TOPIC_CMD = 'irriga-ai/ceo-hugovinicius/cmd';
 const MQTT_TOPIC_STATUS = 'irriga-ai/ceo-hugovinicius/status';
 const MQTT_TOPIC_PLAN = 'irriga-ai/ceo-hugovinicius/plan';
+const MQTT_TOPIC_CONFIG = 'irriga-ai/ceo-hugovinicius/config';
 let mqttReconectarTimer = null;
 
 function iniciarMqttNuvem() {
@@ -460,11 +511,32 @@ function iniciarMqttNuvem() {
       const data = JSON.parse(message.payloadString);
       if (message.destinationName === MQTT_TOPIC_STATUS) {
         console.log('📩 [MQTT] Telemetria recebida do ESP32:', data);
-        S.device = { ...S.device, online: true, lastSeen: Date.now(), status: data };
+        S.device = { ...S.device, online: true, lastSeen: Date.now(), status: data, telemetry: data };
         if (typeof data.tank_L === 'number') S.tank.level_L = data.tank_L;
         if (typeof data.filter_pct === 'number') S.filtro.pct = data.filter_pct;
         salvar();
         render();
+      } else if (message.destinationName === MQTT_TOPIC_CONFIG) {
+        console.log('🔄 [MQTT] Configuração compartilhada recebida da nuvem:', data);
+        if (data && Array.isArray(data.zones)) {
+          data.zones.forEach((remoteZ, idx) => {
+            if (S.zones[idx]) {
+              S.zones[idx].crop = remoteZ.crop || null;
+              if (remoteZ.tape_meters) S.zones[idx].tape_meters = remoteZ.tape_meters;
+              if (remoteZ.emitter_spacing_cm) S.zones[idx].emitter_spacing_cm = remoteZ.emitter_spacing_cm;
+              if (remoteZ.emitter_flow_lph) S.zones[idx].emitter_flow_lph = remoteZ.emitter_flow_lph;
+              if (typeof remoteZ.mulch === 'boolean') S.zones[idx].mulch = remoteZ.mulch;
+              if (typeof remoteZ.fine_pct === 'number') S.zones[idx].fine_pct = remoteZ.fine_pct;
+              if (remoteZ.restricao_modo) S.zones[idx].restricao_modo = remoteZ.restricao_modo;
+            }
+          });
+          if (data.quota) S.quota = { ...S.quota, ...data.quota };
+          if (data.soil) S.soil = data.soil;
+          if (data.site) S.site = { ...S.site, ...data.site };
+          if (data.security) S.security = { ...S.security, ...data.security };
+          localStorage.setItem(KEY, JSON.stringify(S));
+          render();
+        }
       }
     } catch (e) {
       console.error('Erro ao ler mensagem MQTT:', e);
@@ -481,6 +553,7 @@ function iniciarMqttNuvem() {
       window.MQTT_CONNECTING = false;
       console.log('✅ [MQTT] WebApp conectado com sucesso à nuvem HiveMQ!');
       client.subscribe(MQTT_TOPIC_STATUS);
+      client.subscribe(MQTT_TOPIC_CONFIG);
       // Envia o plano diário atual para o ESP32 assim que conecta
       setTimeout(() => {
         try {
@@ -680,6 +753,120 @@ function gerarLuzesEspia(P) {
   return espias;
 }
 
+function renderFilaIrrigacao(agora, ev) {
+  const telemetry = S.device?.telemetry;
+  const activeZoneId = (telemetry && typeof telemetry.active_zone === 'number') ? telemetry.active_zone : (agora ? agora.zona : 0);
+  const activeRemL = (telemetry && typeof telemetry.active_rem_L === 'number') ? telemetry.active_rem_L : (agora ? Math.round(agora.litrosRestantes || agora.litros || 0) : 0);
+  const queueZ1 = (telemetry && typeof telemetry.queue_z1_L === 'number') ? telemetry.queue_z1_L : 0;
+  const queueZ2 = (telemetry && typeof telemetry.queue_z2_L === 'number') ? telemetry.queue_z2_L : 0;
+
+  const itens = [];
+
+  // 1. Zona ativa no momento
+  if (activeZoneId > 0) {
+    const zObj = S.zones.find((z) => z.id === activeZoneId);
+    const nomeZ = zObj ? zObj.nome.split('—')[0].trim() : `Zona ${activeZoneId}`;
+    const cropNome = zObj?.crop && C.CROPS[zObj.crop.id] ? `${C.CROPS[zObj.crop.id].emoji} ${C.CROPS[zObj.crop.id].nome}` : '🟫 Canteiro livre';
+    itens.push({
+      tipo: 'ativa',
+      zona: activeZoneId,
+      titulo: `${nomeZ} · ${cropNome}`,
+      sub: `Em irrigação agora · Restam ~${fmtL(activeRemL)}`,
+      badge: '💧 Regando',
+      badgeClass: 'blue',
+      acaoBtn: '✕ Parar',
+      btnClass: 'red',
+      onclick: 'cancelarRegaManual(event)',
+    });
+  }
+
+  // 2. Fila do ESP32 (Override / Fila)
+  const filaEsp = [
+    { id: 1, litros: Math.round(queueZ1) },
+    { id: 2, litros: Math.round(queueZ2) },
+  ];
+  filaEsp.forEach((f) => {
+    if (f.litros >= 2 && f.id !== activeZoneId) {
+      const zObj = S.zones.find((z) => z.id === f.id);
+      const nomeZ = zObj ? zObj.nome.split('—')[0].trim() : `Zona ${f.id}`;
+      const cropNome = zObj?.crop && C.CROPS[zObj.crop.id] ? `${C.CROPS[zObj.crop.id].emoji} ${C.CROPS[zObj.crop.id].nome}` : '🟫 Canteiro';
+      itens.push({
+        tipo: 'fila',
+        zona: f.id,
+        titulo: `${nomeZ} · ${cropNome}`,
+        sub: `Na fila (aguardando vez) · Volume: ${fmtL(f.litros)}`,
+        badge: '⏳ Na Fila',
+        badgeClass: 'amber',
+        acaoBtn: '✕ Cancelar',
+        btnClass: '',
+        onclick: `removerDaFila(${f.id})`,
+      });
+    }
+  });
+
+  // 3. Se não houver nada irrigando nem na fila do override, mostra os próximos turnos automáticos
+  if (!itens.length) {
+    const horaAgoraMin = new Date().getHours() * 60 + new Date().getMinutes();
+    const manhaMin = C.hhmmToMin(S.windows?.dawn_start || '04:00');
+    const tardeMin = C.hhmmToMin(S.windows?.evening || '16:00');
+
+    if (horaAgoraMin < manhaMin) {
+      itens.push({
+        tipo: 'turno',
+        titulo: `🌅 Turno da Manhã Cedo (${S.windows?.dawn_start || '04:00'})`,
+        sub: 'Programado pelo Piloto Automático',
+        badge: 'Agendado',
+        badgeClass: 'green',
+      });
+    }
+    if (horaAgoraMin < tardeMin) {
+      itens.push({
+        tipo: 'turno',
+        titulo: `🌇 Turno do Fim de Tarde (${S.windows?.evening || '16:00'})`,
+        sub: 'Programado pelo Piloto Automático',
+        badge: 'Agendado',
+        badgeClass: 'green',
+      });
+    }
+  }
+
+  return `
+    <section class="card" style="margin-bottom:16px;border-left:4px solid ${activeZoneId > 0 ? 'var(--blue)' : 'var(--green)'}">
+      <div class="row between" style="margin-bottom:10px">
+        <div class="row" style="gap:8px;align-items:center">
+          <span style="font-size:18px">📋</span>
+          <div>
+            <div class="t14 b">Fila de Irrigação</div>
+            <div class="t12 mute">${activeZoneId > 0 ? 'Válvula mestra aberta · Irrigando em sequência' : 'Piloto automático em prontidão'}</div>
+          </div>
+        </div>
+        ${activeZoneId > 0 ? '<span class="pill blue"><span class="live"></span>Irrigando</span>' : '<span class="pill green">Pronto</span>'}
+      </div>
+
+      <div style="display:grid;gap:8px">
+        ${itens.length ? itens.map((it) => `
+          <div class="card" style="padding:10px 14px;background:var(--sub);border:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div style="flex:1;min-width:0">
+              <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
+                <span class="pill ${it.badgeClass}" style="font-size:11px;padding:2px 6px">${it.badge}</span>
+                <span class="t13 b" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.titulo)}</span>
+              </div>
+              <div class="t12 mute" style="margin-top:3px">${esc(it.sub)}</div>
+            </div>
+            ${it.acaoBtn ? `
+              <button class="btn sm ${it.btnClass}" style="padding:6px 12px;font-size:12px;white-space:nowrap" onclick="${it.onclick}">
+                ${esc(it.acaoBtn)}
+              </button>
+            ` : ''}
+          </div>
+        `).join('') : `
+          <div class="t13 mute" style="padding:4px 0">Todos os turnos de hoje já foram concluídos com sucesso.</div>
+        `}
+      </div>
+    </section>
+  `;
+}
+
 /* ---------------- Renderização Principal ---------------- */
 function render() {
   document.documentElement.classList.toggle('dark', !!S.ui.dark);
@@ -696,6 +883,7 @@ function render() {
     ${renderCabecalho()}
     ${renderHero(P, agora, proxima, semana, usado, espias)}
     ${renderQuatroBotoes(agora)}
+    ${renderFilaIrrigacao(agora, ev)}
     <section class="zones-grid">
       ${S.zones.map((z, i) => renderCardZona(z, i, P, ev, agora)).join('')}
     </section>
@@ -704,7 +892,7 @@ function render() {
       ${renderEventosRegistrados()}
     </section>
     <p class="mute t12" style="text-align:center;margin-top:4px">
-      Irriga.ai Pro-Duo · <b>v1.5.2-Argon</b> · <a href="./dev-gui.html" style="color:var(--blue);font-weight:750;text-decoration:none">🛠️ Bancada de Testes (Dev-GUI)</a>
+      Irriga.ai Pro-Duo · <b>v1.6.0-Argon</b> · <a href="./dev-gui.html" style="color:var(--blue);font-weight:750;text-decoration:none">🛠️ Bancada de Testes (Dev-GUI)</a>
     </p>
   `;
 }
@@ -716,7 +904,7 @@ function renderCabecalho() {
       <div>
         <div class="brand-title">
           <span>Irriga.ai</span>
-          <span class="pill green" style="font-size:11px;padding:2px 8px">1.5.2-Argon</span>
+          <span class="pill green" style="font-size:11px;padding:2px 8px">1.6.0-Argon</span>
         </div>
         <div class="brand-sub">📍 ${esc(S.site.nome)}</div>
       </div>
@@ -726,7 +914,7 @@ function renderCabecalho() {
         <span class="live" style="width:6px;height:6px;background:currentColor"></span>
         <span>${window.MQTT_CONNECTED ? 'Nuvem' : 'Conectando'}</span>
       </span>
-      <button class="top-btn ${S.ui.locked ? 'locked' : 'unlocked'}" onclick="alternarCadeado()" title="Trava contra toques acidentais">
+      <button class="top-btn ${S.ui.locked ? 'locked' : 'unlocked'}" onclick="alternarCadeado()" title="${S.ui.locked ? 'Toque para destravar com o PIN' : 'Toque para travar'}">
         <span>${S.ui.locked ? '🔒 Travado' : '🔓 Destravado'}</span>
       </button>
       <button class="top-btn" onclick="abrirClaude()" title="Consultar ou enviar arquivo para o Claude">
@@ -928,10 +1116,14 @@ function renderCardZona(z, i, P, ev, agora) {
         <div class="zone-emoji">🟫</div>
         <div style="flex:1">
           <div class="zone-title">${esc(z.nome)}</div>
-          <div class="mute t13">${z.area_m2} m² · Canteiro livre</div>
+          <div class="mute t13">${z.area_m2} m² · Canteiro livre (0 L/dia automático)</div>
         </div>
       </div>
-      <div class="row" style="margin-top:16px;gap:8px">
+      <div class="row" style="margin-top:14px;gap:8px">
+        <button class="btn sm" style="flex:1" onclick="abrirZona(${i})">⚙️ Fita e Ajustes</button>
+        <button class="btn sm" style="flex:1" onclick="abrirRegarAgora([${i}])">💧 Override nesta zona</button>
+      </div>
+      <div class="row" style="margin-top:8px;gap:8px">
         <button class="btn sm" style="flex:1" onclick="abrirGuiaCulturas(${i})">📖 Ver Culturas & Espaçamentos</button>
         <button class="btn sm primary" style="flex:1" onclick="abrirPlantio(${i})">🌱 Cadastrar Cultura</button>
       </div>
@@ -1149,12 +1341,46 @@ function renderEventosRegistrados() {
 
 function iconeClima(w) { return (w.rain || 0) >= 5 && (w.rain_prob ?? 100) >= 60 ? '🌧️' : ((w.rain || 0) >= 1 || (w.rain_prob || 0) >= 40) ? '🌦️' : (w.tmax || 0) >= 34 ? '☀️' : '⛅'; }
 
+let timerRelock = null;
+function iniciarTimerRelock() {
+  if (timerRelock) clearTimeout(timerRelock);
+  timerRelock = setTimeout(() => {
+    S.ui.locked = true;
+    salvar();
+    render();
+    toast('🔒 Painel travado automaticamente por inatividade.');
+  }, 10 * 60 * 1000);
+}
+
+function solicitarDestravamentoComPin(onSuccess) {
+  if (!S.security || S.security.enabled === false) {
+    S.ui.locked = false;
+    iniciarTimerRelock();
+    salvar();
+    render();
+    if (typeof onSuccess === 'function') onSuccess();
+    return;
+  }
+  if (typeof abrirModalPin === 'function') {
+    abrirModalPin(onSuccess);
+  } else {
+    S.ui.locked = false;
+    salvar();
+    render();
+    if (typeof onSuccess === 'function') onSuccess();
+  }
+}
+
 function alternarCadeado() {
-  S.ui.locked = !S.ui.locked;
-  salvar();
-  render();
-  toast(S.ui.locked ? '🔒 Travado contra toques acidentais' : '🔓 Destravado para edições');
-  if (!S.ui.locked) setTimeout(() => { S.ui.locked = true; salvar(); render(); }, 600000);
+  if (S.ui.locked) {
+    solicitarDestravamentoComPin();
+  } else {
+    S.ui.locked = true;
+    if (timerRelock) clearTimeout(timerRelock);
+    salvar();
+    render();
+    toast('🔒 Painel travado com sucesso.');
+  }
 }
 
 async function instalarPwa() {

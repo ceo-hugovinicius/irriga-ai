@@ -22,23 +22,21 @@ function fecharModal() {
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharModal(); });
 
 function destravarPeloModal(btn) {
-  S.ui.locked = false;
-  salvar();
-  render();
-  toast('🔓 Destravado para edições');
-  if (btn) {
-    const box = btn.closest('.locked-note');
-    if (box) {
-      box.outerHTML = `<div class="alert success" style="margin-top:8px;padding:8px 12px;font-size:13px;display:flex;align-items:center;gap:6px"><span>✅ Painel destravado para edições</span></div>`;
+  solicitarDestravamentoComPin(() => {
+    if (btn) {
+      const box = btn.closest('.locked-note') || btn.closest('.alert.warn') || btn.parentElement;
+      if (box) {
+        box.outerHTML = `<div class="alert success" style="margin-top:8px;padding:8px 12px;font-size:13px;display:flex;align-items:center;gap:6px"><span>✅ Painel destravado para edições</span></div>`;
+      }
     }
-  }
-  const m = document.getElementById('modal');
-  if (m) {
-    m.querySelectorAll('[disabled]').forEach((el) => {
-      el.removeAttribute('disabled');
-      el.style.opacity = '1';
-    });
-  }
+    const m = document.getElementById('modal');
+    if (m) {
+      m.querySelectorAll('[disabled]').forEach((el) => {
+        el.removeAttribute('disabled');
+        el.style.opacity = '1';
+      });
+    }
+  });
 }
 
 function avisoCadeado() {
@@ -47,6 +45,120 @@ function avisoCadeado() {
     <span>🔒 Cadeado ativo contra toques acidentais.</span>
     <button class="btn sm" style="background:var(--card);padding:5px 10px" onclick="destravarPeloModal(this)">🔓 Destravar</button>
   </div>`;
+}
+
+function abrirModalPin(onSuccess) {
+  let pinDigitado = '';
+  function atualizarVisorPin() {
+    const visor = document.getElementById('pin-visor-dots');
+    if (!visor) return;
+    visor.innerHTML = [0, 1, 2, 3].map((idx) => {
+      const preenchido = idx < pinDigitado.length;
+      return `<span style="width:14px;height:14px;border-radius:50%;background:${preenchido ? 'var(--green)' : 'var(--line)'};border:2px solid ${preenchido ? 'var(--green)' : 'var(--mute)'};display:inline-block"></span>`;
+    }).join('');
+  }
+
+  window._digitarPin = function(digito) {
+    if (pinDigitado.length < 4) {
+      pinDigitado += digito;
+      atualizarVisorPin();
+      if (pinDigitado.length === 4) {
+        setTimeout(window._confirmarPin, 120);
+      }
+    }
+  };
+
+  window._apagarPin = function() {
+    if (pinDigitado.length > 0) {
+      pinDigitado = pinDigitado.slice(0, -1);
+      atualizarVisorPin();
+    }
+  };
+
+  window._confirmarPin = function() {
+    const pinCorreto = S.security?.pin || '1234';
+    if (pinDigitado === pinCorreto) {
+      S.ui.locked = false;
+      if (typeof iniciarTimerRelock === 'function') iniciarTimerRelock();
+      salvar();
+      render();
+      fecharModal();
+      toast('🔓 Painel destravado com sucesso!');
+      if (typeof onSuccess === 'function') onSuccess();
+    } else {
+      const visor = document.getElementById('pin-visor-dots');
+      if (visor) {
+        visor.style.transform = 'translateX(8px)';
+        setTimeout(() => { if (visor) visor.style.transform = 'translateX(-8px)'; }, 70);
+        setTimeout(() => { if (visor) visor.style.transform = 'translateX(0)'; }, 140);
+      }
+      toast('❌ Senha incorreta! Tente novamente.');
+      pinDigitado = '';
+      atualizarVisorPin();
+    }
+  };
+
+  abrirModal(`
+    <div style="text-align:center;padding:10px 0">
+      <div style="font-size:36px">🔒</div>
+      <h3 style="margin-top:6px">Destravar Painel</h3>
+      <p class="t13 mute" style="margin-top:2px">Digite a senha de 4 dígitos para liberar alterações.</p>
+      
+      <div id="pin-visor-dots" style="display:flex;justify-content:center;gap:12px;margin:20px 0;transition:transform .15s ease">
+        <span style="width:14px;height:14px;border-radius:50%;background:var(--line);border:2px solid var(--mute);display:inline-block"></span>
+        <span style="width:14px;height:14px;border-radius:50%;background:var(--line);border:2px solid var(--mute);display:inline-block"></span>
+        <span style="width:14px;height:14px;border-radius:50%;background:var(--line);border:2px solid var(--mute);display:inline-block"></span>
+        <span style="width:14px;height:14px;border-radius:50%;background:var(--line);border:2px solid var(--mute);display:inline-block"></span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;max-width:240px;margin:0 auto">
+        ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `
+          <button class="btn" style="height:54px;font-size:20px;font-weight:700;border-radius:14px" onclick="window._digitarPin('${n}')">${n}</button>
+        `).join('')}
+        <button class="btn" style="height:54px;font-size:18px;border-radius:14px" onclick="window._apagarPin()">⌫</button>
+        <button class="btn" style="height:54px;font-size:20px;font-weight:700;border-radius:14px" onclick="window._digitarPin('0')">0</button>
+        <button class="btn green" style="height:54px;font-size:16px;font-weight:700;border-radius:14px" onclick="window._confirmarPin()">✓</button>
+      </div>
+
+      <div style="margin-top:16px">
+        <button class="btn sm" onclick="fecharModal()">Cancelar</button>
+      </div>
+      <div class="t11 mute" style="margin-top:8px">PIN padrão inicial: 1234 (alterável em Ajustes)</div>
+    </div>
+  `);
+}
+
+function trocarPinModal() {
+  if (S.ui.locked) {
+    solicitarDestravamentoComPin(trocarPinModal);
+    return;
+  }
+  abrirModal(`
+    <h3>🔑 Alterar PIN de Segurança</h3>
+    <p class="t13 mute">Defina um novo PIN de 4 dígitos para proteger o painel contra alterações indevidas.</p>
+    <div class="field" style="margin-top:14px">
+      <label>Novo PIN (4 dígitos numéricos)</label>
+      <input id="input-novo-pin" type="tel" maxlength="4" pattern="[0-9]*" placeholder="Ex: 5820" style="font-size:20px;letter-spacing:6px;text-align:center" />
+    </div>
+    <div style="display:grid;gap:8px;margin-top:14px">
+      <button class="btn primary full" onclick="salvarNovoPin()">Salvar Novo PIN</button>
+      <button class="btn full" onclick="abrirAjustes()">Voltar</button>
+    </div>
+  `);
+}
+
+function salvarNovoPin() {
+  const inp = document.getElementById('input-novo-pin');
+  const val = inp ? inp.value.trim() : '';
+  if (!val || val.length !== 4 || isNaN(val)) {
+    toast('❌ Digite exatamente 4 dígitos numéricos!');
+    return;
+  }
+  if (!S.security) S.security = { pin: '1234', enabled: true };
+  S.security.pin = val;
+  salvarConfigCloud();
+  toast(`✅ PIN alterado com sucesso para ${val}!`);
+  abrirAjustes();
 }
 
 /* ============================================================================
@@ -563,20 +675,28 @@ function abrirGuiaCulturas(i, cropIdSel) {
  * ========================================================================== */
 function executarTrocaCulturaConfirmada(i, cid, dt, famAnterior) {
   if (S.ui.locked) {
-    toast('🔒 Destrave o cadeado no topo para confirmar a troca.');
+    solicitarDestravamentoComPin(() => executarTrocaCulturaConfirmada(i, cid, dt, famAnterior));
     return;
   }
   const z = S.zones[i];
-  const antiga = z.crop && C.CROPS[z.crop.id] ? C.CROPS[z.crop.id].nome : 'anterior';
+  const antiga = z.crop && C.CROPS[z.crop.id] ? C.CROPS[z.crop.id].nome : 'canteiro livre';
   z.enabled = true;
-  z.crop = { id: cid, plantio: dt, anterior: famAnterior };
-  z.restricao_modo = 'auto';
-  z.Dr_mm = 1.0;
-  audit('app', `🔄 Confirmou troca de cultura na Zona ${z.id}: encerrou ${antiga} → plantou ${C.CROPS[cid].emoji} ${C.CROPS[cid].nome}`, 'config');
-  salvar();
+  if (cid === 'nenhuma' || !cid) {
+    z.crop = null;
+    z.restricao_modo = 'auto';
+    audit('app', `🔄 Confirmou canteiro livre na Zona ${z.id}: encerrou ${antiga} → Canteiro Livre (0 L/dia)`, 'config');
+    toast(`🟫 Zona ${z.id} agora está como Canteiro Livre!`);
+  } else {
+    z.crop = { id: cid, plantio: dt, anterior: famAnterior };
+    z.restricao_modo = 'auto';
+    z.Dr_mm = 1.0;
+    audit('app', `🔄 Confirmou troca de cultura na Zona ${z.id}: encerrou ${antiga} → plantou ${C.CROPS[cid].emoji} ${C.CROPS[cid].nome}`, 'config');
+    toast(`🌱 Troca confirmada: ${C.CROPS[cid].nome} ativo na Zona ${z.id}!`);
+  }
+  salvarConfigCloud();
+  sincronizarEsp32();
   render();
   fecharModal();
-  toast(`🌱 Troca confirmada: ${C.CROPS[cid].nome} ativo na Zona ${z.id}!`);
 }
 
 function abrirPlantio(i, cropIdSel, dataSel, pedirConfirmacao = false) {
@@ -588,15 +708,18 @@ function abrirPlantio(i, cropIdSel, dataSel, pedirConfirmacao = false) {
 
   const famAnterior = (cropAtual ? cropAtual.familia : z.crop?.anterior) || 'Leguminosas';
   const recomendadas = C.sugerirRotacao(famAnterior);
-  const cid = cropIdSel || recomendadas[0]?.id || 'feijao_verde';
-  const cNova = C.CROPS[cid];
+  const cid = cropIdSel !== undefined ? cropIdSel : (temCulturaAtiva ? z.crop.id : 'nenhuma');
+  const isNenhuma = cid === 'nenhuma' || !cid;
+  const cNova = isNenhuma
+    ? { nome: 'Nenhuma (Canteiro Livre)', emoji: '🟫', familia: 'Nenhuma', espacamento_ruas_m: '—', espacamento_plantas_m: '—' }
+    : (C.CROPS[cid] || C.CROPS['feijao_verde']);
   const dt = dataSel || hoje();
-  const prev = C.previaSafra(z, S.soil, cid, dt);
+  const prev = isNenhuma ? { ciclo: 0, colheita: dt, totalL: 0 } : C.previaSafra(z, S.soil, cid, dt);
 
   abrirModal(`
     <div class="row between" style="margin-bottom:4px">
       <h3>🔄 ${temCulturaAtiva ? 'Trocar Cultura da Zona' : 'Cadastrar Cultura'} · Zona ${z.id}</h3>
-      <button class="btn sm" onclick="abrirGuiaCulturas(${i},'${cid}')">📖 Só consultar guia</button>
+      <button class="btn sm" onclick="abrirGuiaCulturas(${i},'${isNenhuma ? 'feijao_verde' : cid}')">📖 Só consultar guia</button>
     </div>
 
     ${temCulturaAtiva ? `
@@ -614,46 +737,51 @@ function abrirPlantio(i, cropIdSel, dataSel, pedirConfirmacao = false) {
     ${avisoCadeado()}
 
     <div class="field">
-      <label>1. Escolha a nova cultura para plantar agora</label>
+      <label>1. Escolha a nova cultura (ou deixe como canteiro livre)</label>
       <div class="chips">
+        <button class="chip ${isNenhuma ? 'sel' : ''}" onclick="abrirPlantio(${i},'nenhuma','${dt}',false)">🟫 Nenhuma (Canteiro Livre)</button>
         ${Object.entries(C.CROPS).map(([id, c]) => {
           const rec = c.familia !== famAnterior;
           return `<button class="chip ${id === cid ? 'sel' : ''}" onclick="abrirPlantio(${i},'${id}','${dt}',false)">${c.emoji} ${c.nome}${rec ? '' : ' ⚠️'}</button>`;
         }).join('')}
       </div>
       <div class="t12 mute" style="margin-top:6px">
-        ${cNova.familia === famAnterior
-          ? `⚠️ Atenção: ${cNova.nome} repete a família <b>${famAnterior}</b> na mesma zona.`
-          : `✅ Boa rotação (${cNova.familia}): ${C.sugerirRotacao(famAnterior).find((x) => x.id === cid)?.motivo || 'descansa a terra'}.`}
+        ${isNenhuma
+          ? '🟫 <b>Canteiro livre:</b> Irrigação automática = 0 L/dia. O botão manual "Regar Agora" continua liberado para molhar a terra antes do plantio.'
+          : (cNova.familia === famAnterior
+            ? `⚠️ Atenção: ${cNova.nome} repete a família <b>${famAnterior}</b> na mesma zona.`
+            : `✅ Boa rotação (${cNova.familia}): ${C.sugerirRotacao(famAnterior).find((x) => x.id === cid)?.motivo || 'descansa a terra'}.`)}
       </div>
     </div>
 
-    <div class="field">
-      <label>2. Data do plantio da nova safra</label>
-      <input type="date" value="${dt}" onchange="abrirPlantio(${i},'${cid}',this.value,false)" />
-    </div>
-
-    <!-- Resumo + Espaçamentos Mínimos da Nova Cultura -->
-    <div class="card" style="margin-top:12px;background:var(--sub);padding:12px 14px">
-      <div class="t12 mute b" style="text-transform:uppercase;margin-bottom:6px">📐 Espaçamento & Ciclo de ${cNova.emoji} ${cNova.nome}</div>
-      <div class="list t13">
-        <div class="li"><span>↔️ Espaçamento mínimo da rua</span><b>${esc(cNova.espacamento_ruas_m || '1,0 m')}</b></div>
-        <div class="li"><span>🌱 Espaçamento entre plantas</span><b>${esc(cNova.espacamento_plantas_m || '0,30 m')}</b></div>
-        <div class="li"><span>⏳ Ciclo até a colheita</span><b>${prev.ciclo} dias (~${fmtData(prev.colheita)})</b></div>
-        <div class="li"><span>💧 Consumo total estimado</span><b>${fmtL(prev.totalL)}</b></div>
+    ${!isNenhuma ? `
+      <div class="field">
+        <label>2. Data do plantio da nova safra</label>
+        <input type="date" value="${dt}" onchange="abrirPlantio(${i},'${cid}',this.value,false)" />
       </div>
-    </div>
+
+      <!-- Resumo + Espaçamentos Mínimos da Nova Cultura -->
+      <div class="card" style="margin-top:12px;background:var(--sub);padding:12px 14px">
+        <div class="t12 mute b" style="text-transform:uppercase;margin-bottom:6px">📐 Espaçamento & Ciclo de ${cNova.emoji} ${cNova.nome}</div>
+        <div class="list t13">
+          <div class="li"><span>↔️ Espaçamento mínimo da rua</span><b>${esc(cNova.espacamento_ruas_m || '1,0 m')}</b></div>
+          <div class="li"><span>🌱 Espaçamento entre plantas</span><b>${esc(cNova.espacamento_plantas_m || '0,30 m')}</b></div>
+          <div class="li"><span>⏳ Ciclo até a colheita</span><b>${prev.ciclo} dias (~${fmtData(prev.colheita)})</b></div>
+          <div class="li"><span>💧 Consumo total estimado</span><b>${fmtL(prev.totalL)}</b></div>
+        </div>
+      </div>
+    ` : ''}
 
     <!-- Passo de Dupla Confirmação Explícita ("Confirmar troca de cultura") -->
     ${pedirConfirmacao ? `
       <div class="card" style="margin-top:14px;background:var(--red-bg);border:2px solid var(--red-bd);padding:14px 16px">
-        <div class="t14 b" style="color:var(--red)">🛑 Confirmar Troca de Cultura?</div>
+        <div class="t14 b" style="color:var(--red)">🛑 Confirmar Alteração?</div>
         <p class="t13 ink2" style="margin-top:4px">
-          Ao confirmar, a safra atual de <b>${cropAtual ? cropAtual.nome : 'cultura anterior'} (Dia ${dapAtual})</b> será encerrada e substituída imediatamente por <b>${cNova.emoji} ${cNova.nome}</b> (plantio em ${fmtData(dt)}).
+          Ao confirmar, a safra atual de <b>${cropAtual ? cropAtual.nome : 'cultura anterior'} (Dia ${dapAtual})</b> será encerrada e substituída por <b>${cNova.emoji} ${cNova.nome}</b>.
         </p>
         <div style="display:grid;gap:8px;margin-top:12px">
           <button class="btn primary full" onclick="executarTrocaCulturaConfirmada(${i},'${cid}','${dt}','${famAnterior}')">
-            ✅ Sim, Confirmar Troca de Cultura
+            ✅ Sim, Confirmar Alteração
           </button>
           <button class="btn full" style="background:var(--card)" onclick="abrirPlantio(${i},'${cid}','${dt}',false)">
             ⬅️ Não, voltar sem trocar
@@ -663,15 +791,15 @@ function abrirPlantio(i, cropIdSel, dataSel, pedirConfirmacao = false) {
     ` : `
       <div style="display:grid;gap:8px;margin-top:14px">
         ${temCulturaAtiva ? `
-          <button class="btn primary full" onclick="if(S.ui.locked){toast('🔒 Destrave o cadeado acima primeiro.');return;} abrirPlantio(${i},'${cid}','${dt}',true)">
-            🔄 Preparar Troca para ${cNova.nome}...
+          <button class="btn primary full" onclick="if(S.ui.locked){solicitarDestravamentoComPin(()=>abrirPlantio(${i},'${cid}','${dt}',true));return;} abrirPlantio(${i},'${cid}','${dt}',true)">
+            🔄 Preparar Alteração para ${cNova.nome}...
           </button>
         ` : `
           <button class="btn primary full" onclick="executarTrocaCulturaConfirmada(${i},'${cid}','${dt}','${famAnterior}')">
-            ✅ Confirmar Plantio de ${cNova.nome}
+            ✅ Confirmar ${isNenhuma ? 'Canteiro Livre' : `Plantio de ${cNova.nome}`}
           </button>
         `}
-        <button class="btn full" onclick="fecharModal()">Cancelar (Manter safra atual)</button>
+        <button class="btn full" onclick="fecharModal()">Cancelar (Manter como está)</button>
       </div>
     `}
   `);
@@ -804,14 +932,36 @@ function abrirAjustes() {
 
     <div class="field">
       <label>Tipo de terra do sítio</label>
-      <select ${dis} onchange="S.soil=this.value;audit('app','Solo: '+this.value,'config');salvar();render()">
+      <select ${dis} onchange="S.soil=this.value;audit('app','Solo: '+this.value,'config');salvarConfigCloud();render()">
         ${Object.entries(C.SOLOS).map(([k, v]) => `<option value="${k}" ${S.soil === k ? 'selected' : ''}>${v.nome}</option>`).join('')}
       </select>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+    <!-- Seção de Segurança Anti-Griefing (PIN 4 Dígitos) -->
+    <div class="card" style="margin-top:14px;background:var(--sub);padding:12px 14px;border:1px solid var(--line)">
+      <div class="row between" style="align-items:center">
+        <div>
+          <div class="t13 b">🔒 Segurança Anti-Griefing (PIN)</div>
+          <div class="t12 mute">Exigir senha de 4 dígitos para destravar edições</div>
+        </div>
+        <input ${dis} type="checkbox" style="width:20px;height:20px" ${S.security?.enabled !== false ? 'checked' : ''} onchange="if(!S.security)S.security={pin:'1234',enabled:true};S.security.enabled=this.checked;salvarConfigCloud();render();toast(this.checked?'🔒 PIN ativado':'🔓 PIN desativado');abrirAjustes()" />
+      </div>
+      <div class="row between" style="margin-top:10px;align-items:center;border-top:1px dashed var(--line);padding-top:8px">
+        <div class="t12 mute">PIN Atual: <b>${S.security?.pin || '1234'}</b></div>
+        <button ${dis} class="btn sm" onclick="trocarPinModal()">🔑 Alterar PIN</button>
+      </div>
+    </div>
+
+    <!-- Sincronização em Nuvem (Multi-dispositivos) -->
+    <div style="margin-top:12px">
+      <button class="btn blue full sm" onclick="salvarConfigCloud();sincronizarEsp32();toast('☁️ Configurações sincronizadas na nuvem!')">
+        ☁️ Sincronizar Tudo com a Nuvem Agora
+      </button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
       <a class="btn" href="./dev-gui.html" style="text-decoration:none">🛠️ Bancada de Testes</a>
-      <button class="btn danger" ${dis} onclick="if(!S.ui.locked && confirm('Restaurar o estado inicial de fábrica?')){localStorage.removeItem(KEY);S=novoEstado();salvar();render();fecharModal();toast('Sistema restaurado!')}">♻️ Restaurar padrão</button>
+      <button class="btn danger" ${dis} onclick="if(!S.ui.locked && confirm('Restaurar o estado inicial de fábrica (Canteiro Livre)?')){localStorage.removeItem(KEY);S=novoEstado();salvarConfigCloud();render();fecharModal();toast('Sistema restaurado!')}">♻️ Restaurar padrão</button>
     </div>
     <button class="btn full" style="margin-top:10px" onclick="fecharModal()">Fechar</button>
   `);

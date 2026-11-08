@@ -688,7 +688,7 @@
       crop: { id: cropId, plantio, anterior },
     });
     return {
-      versao: '1.5.2-argon',
+      versao: '1.6.0-argon',
       site: { nome: 'Sítio — São Vicente do Seridó (PB)', lat: -6.95325, lon: -36.36853, tz: 'America/Fortaleza' },
       soil: 'franco_arenoso',
       tank: { capacity: 5000, level_L: 3750, reserve_pct: 25 },
@@ -705,8 +705,8 @@
       boost: { pct: 0, until: null },
       pause: { until: null, indefinite: false, origem: null },
       zones: [
-        zona(1, 'Zona 1 — Oeste', 128, 100, 30, 1.2, 'maxixe', '2026-09-20', 'Leguminosas'),
-        zona(2, 'Zona 2 — Leste', 158, 120, 30, 1.2, 'melancia', '2026-08-25', 'Convolvuláceas'),
+        zona(1, 'Zona 1 — Oeste', 128, 100, 30, 1.2, null, null, 'Leguminosas'),
+        zona(2, 'Zona 2 — Leste', 158, 120, 30, 1.2, null, null, 'Convolvuláceas'),
       ],
     };
   }

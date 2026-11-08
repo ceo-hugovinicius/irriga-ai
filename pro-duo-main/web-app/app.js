@@ -623,38 +623,103 @@ const MQTT_TOPIC_STATUS = 'irriga-ai/ceo-hugovinicius/status';
 const MQTT_TOPIC_PLAN = 'irriga-ai/ceo-hugovinicius/plan';
 const MQTT_TOPIC_CONFIG = 'irriga-ai/ceo-hugovinicius/config';
 let mqttReconectarTimer = null;
-let ultimoAlertaDisparadoMs = 0;
+let ultimoEnvioManhaHoje = '';
+let ultimoEnvioTardeHoje = '';
+let ultimoAlertaEmergenciaMs = 0;
+
+async function dispararWebhookWhatsApp(texto, tipo = 'geral') {
+  const url = S.site?.webhook_whatsapp;
+  if (!url) return false;
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (S.site?.whatsapp_api_key) {
+      headers['apikey'] = S.site.whatsapp_api_key;
+      headers['Client-Token'] = S.site.whatsapp_api_key;
+    }
+
+    if (url.includes('callmebot.com')) {
+      const getUrl = `${url}?group=${encodeURIComponent(S.site?.whatsapp_destino || '')}&text=${encodeURIComponent(texto)}&apikey=${encodeURIComponent(S.site?.whatsapp_api_key || '')}`;
+      return await fetch(getUrl).then((r) => r.ok).catch(() => false);
+    } else {
+      const payload = JSON.stringify({
+        number: S.site?.whatsapp_destino || '',
+        phone: S.site?.whatsapp_destino || '',
+        text: texto,
+        message: texto,
+        sender: 'SABIÁ Irriga.ai',
+        tipo,
+        ts: Date.now()
+      });
+      return await fetch(url, { method: 'POST', headers, body: payload }).then((r) => r.ok).catch(() => false);
+    }
+  } catch (e) {
+    return false;
+  }
+}
+
+async function verificarDisparosAutomaticosWhatsApp() {
+  if (!S.site?.webhook_whatsapp || S.site?.whatsapp_bot_ativo === false) return;
+  const agora = new Date();
+  const hora = agora.getHours();
+  const min = agora.getMinutes();
+  const hojeStr = hoje();
+  const Notif = window.SabiaNotificacoes;
+  if (!Notif) return;
+
+  // 1. Boletim Matinal das 06:00 (janela de disparo entre 06:00 e 06:20)
+  if (hora === 6 && min <= 20 && ultimoEnvioManhaHoje !== hojeStr && S.site?.whatsapp_auto_manha !== false) {
+    ultimoEnvioManhaHoje = hojeStr;
+    const P = planos();
+    const msg = Notif.gerarResumoManha(S, P, hojeStr);
+    dispararWebhookWhatsApp(msg, 'boletim_manha');
+    audit('sistema', '☀️ Boletim matinal enviado automaticamente ao grupo do WhatsApp', 'notificacao');
+  }
+
+  // 2. Fechamento do Entardecer das 18:00 (janela de disparo entre 18:00 e 18:20)
+  if (hora === 18 && min <= 20 && ultimoEnvioTardeHoje !== hojeStr && S.site?.whatsapp_auto_tarde !== false) {
+    ultimoEnvioTardeHoje = hojeStr;
+    const P = planos();
+    const msg = Notif.gerarResumoTarde(S, P, hojeStr, usadoHoje());
+    dispararWebhookWhatsApp(msg, 'boletim_tarde');
+    audit('sistema', '🌙 Fechamento do dia enviado automaticamente ao grupo do WhatsApp', 'notificacao');
+  }
+
+  // 3. Queda de sinal por mais de 24 horas consecutivas (86.400.000 ms)
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  if (!espOnline && S.device?.lastSeen && (Date.now() - S.device.lastSeen > 24 * 3600000) && !window.ALERTA_24H_ENVIADO) {
+    window.ALERTA_24H_ENVIADO = true;
+    const msg = Notif.gerarAlertaEmergencia('sabia_offline_24h', { siteNome: S.site?.nome });
+    dispararWebhookWhatsApp(msg, 'sabia_offline_24h');
+    audit('sistema', '📡 Alerta de SABIÁ offline > 24h enviado ao grupo do WhatsApp', 'segurança');
+  } else if (espOnline) {
+    window.ALERTA_24H_ENVIADO = false;
+  }
+}
 
 function verificarDisparoAutomaticoEmergencia(data) {
-  if (!S.site?.webhook_whatsapp || S.site?.whatsapp_auto_alerts === false) return;
+  if (!S.site?.webhook_whatsapp || S.site?.whatsapp_auto_emergencias === false) return;
   const now = Date.now();
-  if (now - ultimoAlertaDisparadoMs < 15 * 60000) return; // Proteção contra repetição (15 minutos)
+  if (now - ultimoAlertaEmergenciaMs < 15 * 60000) return; // Trava contra flood (15 min)
 
   let tipoAlerta = null;
   if (data.alert && (String(data.alert).includes('CANO SECO') || String(data.alert).includes('VAZAMENTO'))) {
     tipoAlerta = 'tubo_seco';
   } else if (data.flow_lpm < 0.2 && data.active_rem_L > 2.0 && data.active_zone > 0) {
     tipoAlerta = 'tubo_seco';
-  } else if (typeof data.tank_L === 'number' && data.tank_L < (S.tank.capacity * (S.tank.reserve_pct || 25) / 100)) {
+  } else if (typeof data.tank_L === 'number' && data.tank_L < (S.tank.capacity * 0.20)) {
     tipoAlerta = 'caixa_critica';
   }
 
   if (tipoAlerta && window.SabiaNotificacoes) {
-    ultimoAlertaDisparadoMs = now;
+    ultimoAlertaEmergenciaMs = now;
     const msg = window.SabiaNotificacoes.gerarAlertaEmergencia(tipoAlerta, {
       siteNome: S.site?.nome,
       zona: data.active_zone || 1,
       nivel_L: data.tank_L,
-      pct: Math.round(100 * data.tank_L / S.tank.capacity),
+      pct: Math.round(100 * (data.tank_L || 1000) / S.tank.capacity),
     });
-    fetch(S.site.webhook_whatsapp, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sender: 'SABIÁ Irriga.ai', tipo: tipoAlerta, texto: msg, ts: now })
-    }).catch(() => {});
-    if (typeof audit === 'function') {
-      audit('sistema', `🚨 Alerta de emergência (${tipoAlerta}) despachado para o WhatsApp`, 'segurança');
-    }
+    dispararWebhookWhatsApp(msg, tipoAlerta);
+    audit('sistema', `🚨 Alerta de emergência (${tipoAlerta}) enviado ao grupo do WhatsApp`, 'segurança');
   }
 }
 
@@ -1784,6 +1849,7 @@ async function iniciar() {
   await sincronizarEsp32(); render();
   setInterval(() => { fecharDiasPendentes(); render(); }, 30000);
   setInterval(sincronizarEsp32, 15000);
+  setInterval(verificarDisparosAutomaticosWhatsApp, 30000);
 
   // Atualização frequente (1s) para contadores de rega ativa e relógio do painel
   setInterval(() => {

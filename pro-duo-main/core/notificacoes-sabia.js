@@ -1,13 +1,13 @@
 /* ============================================================================
- * 🌱 SABIÁ · Notificações, Resumos Diários & Pro Tips Agronômicos
+ * 🌱 SABIÁ · Notificações & Boletins Agronômicos Autônomos (WhatsApp do Grupo)
  * ============================================================================
- * Gera boletins acolhedores e alertas em tempo real formatados especialmente
- * para WhatsApp (grupos da família e do sítio), Webhooks e SMS.
- *
- * Tipos de Mensagens:
- *  1. ☀️ Resumo da Manhã (06:00): Regas do 1º turno, fases das culturas, cota e Pro Tip
- *  2. 🌙 Resumo do Entardecer (18:00): Total do dia, cota economizada e status da caixa
- *  3. 🚨 Alertas de Emergência: Tubulação seca, caixa crítica e filtro 120 Mesh
+ * Gera exclusivamente mensagens operacionais agronômicas para o grupo da família:
+ *  1. ☀️ Boletim da Manhã (06:00): Status do cultivo, previsão, fases e Pro Tips de manejo.
+ *  2. 🌙 Fechamento do Entardecer (18:00): Água gasta, cota guardada e saúde da lavoura.
+ *  3. 🧺 Alertas de Colheita & Comercialização: Avisos com dias de antecedência para organizar caixas e venda.
+ *  4. ⚠️ Alerta de Choque de Cota / Plantas com Sede: Detecta déficit hídrico consecutivo e sugere ajuste.
+ *  5. 🚨 Emergências Reais: Cano seco (bomba parada/registro fechado) e caixa d'água na reserva.
+ *  6. 📡 Queda Crítica de Conexão: Notifica APENAS se o SABIÁ ficar mais de 24 horas sem ping.
  * ========================================================================== */
 
 (function (root) {
@@ -17,78 +17,78 @@
     ? require('./crops.js') : (root.IrrigaCrops || {});
 
   const fmtL = (l) => `${Math.round(l).toLocaleString('pt-BR')} L`;
-  const fmtPct = (p) => `${Math.round(p)}%`;
 
   /**
-   * Gera uma Pro Tip agronômica inteligente com base nas culturas ativas e clima.
+   * Gera Pro Tips puramente agrícolas, operacionais e de manejo de safra.
    */
-  function gerarProTip(S, P, climaHoje) {
+  function gerarProTipOperacional(S, P, climaHoje) {
     const tmax = climaHoje?.tmax ?? 33;
-    const wind = climaHoje?.wind ?? 20;
+    const tmaxArr = Math.round(tmax);
     const rainProb = climaHoje?.rain_prob ?? 0;
-    const rainMm = climaHoje?.rain ?? 0;
+    const hojeStr = Core.isoDate(new Date());
 
     const dicas = [];
 
-    // 1. Dica de Reta Final e Restrição Hídrica (°Brix e Cura)
+    // 1. Alerta de Colheita Próxima (Organização da Família, Caixaria e Compradores)
     (S.zones || []).forEach((z) => {
       if (!z.enabled || !z.crop) return;
-      const cd = Core.cropDay(z.crop.id, Core.daysBetween(z.crop.plantio, Core.isoDate(new Date())));
+      const cd = Core.cropDay(z.crop.id, Core.daysBetween(z.crop.plantio, hojeStr));
+      if (cd && cd.diasParaColher <= 7) {
+        if (cd.diasParaColher <= 2) {
+          dicas.push(`🧺 *MUTIRÃO DE COLHEITA (${cd.crop.nome.toUpperCase()}):* Faltam apenas *${cd.diasParaColher} dias* para colher na ${z.nome.split('—')[0].trim()}! Hora de reunir o pessoal, providenciar caixaria e fechar os compradores da feira/Ceasa.`);
+        } else {
+          dicas.push(`🧺 *Colheita se aproximando (${cd.crop.nome}):* Faltam *${cd.diasParaColher} dias* para o ponto de corte na ${z.nome.split('—')[0].trim()}. Dica de colheita: ${cd.crop.colheita}`);
+        }
+      }
+    });
+
+    // 2. Alerta de Reta Final e Restrição Hídrica (Açúcar °Brix / Casca Firme)
+    (S.zones || []).forEach((z) => {
+      if (!z.enabled || !z.crop) return;
+      const cd = Core.cropDay(z.crop.id, Core.daysBetween(z.crop.plantio, hojeStr));
       if (cd && cd.retaFinal && cd.crop.reta_final) {
-        dicas.push(`🍯 *Reta final do ${cd.crop.nome} (${z.nome.split('—')[0].trim()}):* Faltam apenas ${cd.diasParaColher} dias para a colheita! O SABIÁ reduziu a água para ${cd.crop.reta_final.motivo}. A terra mais seca nessa fase é essencial para a qualidade do fruto.`);
+        dicas.push(`🍯 *Manejo de Reta Final (${cd.crop.nome}):* A ${z.nome.split('—')[0].trim()} está na fase final de maturação. O sistema reduziu a rega para ${cd.crop.reta_final.motivo}. Se a terra parecer mais seca nos próximos dias, isso é correto e intencional!`);
       }
     });
 
-    // 2. Dica de Floração / Fase Crítica (Sensibilidade máxima à falta d'água)
+    // 3. Alerta de Plantas Passando Sede (Déficit Hídrico Consecutivo)
+    const pedidoReal = P?.pHoje?.pedidoRealL || 0;
+    const cotaDiaria = S.quota?.daily_L || 1000;
+    if (pedidoReal > cotaDiaria * 1.15) {
+      const defPct = Math.round((100 * (pedidoReal - cotaDiaria)) / pedidoReal);
+      dicas.push(`⚠️ *Aviso de Cota Apertada:* As plantas estão pedindo ${fmtL(pedidoReal)}, mas a cota diária está travada em ${fmtL(cotaDiaria)} (−${defPct}% de água). Se o tempo continuar quente, considere aumentar a cota temporariamente para ${fmtL(Math.round(pedidoReal))} ou dar +1h Flex para não perder rendimento.`);
+    }
+
+    // 4. Floração e Pegamento de Frutos (Fase Nobre que não pode faltar água)
     (S.zones || []).forEach((z) => {
       if (!z.enabled || !z.crop) return;
-      const cd = Core.cropDay(z.crop.id, Core.daysBetween(z.crop.plantio, Core.isoDate(new Date())));
+      const cd = Core.cropDay(z.crop.id, Core.daysBetween(z.crop.plantio, hojeStr));
       if (cd && cd.critica && !cd.retaFinal) {
-        dicas.push(`🌸 *Fase nobre do ${cd.crop.nome} (${z.nome.split('—')[0].trim()}):* A cultura está em *${cd.nomeFase}*! O SABIÁ está priorizando cada gota para garantir o vingamento dos frutos e evitar aborto de flores.`);
+        dicas.push(`🌸 *Fase de Floração/Frutificação (${cd.crop.nome}):* A cultura está no ponto que mais exige água no ciclo todo. A irrigação foi reforçada para segurar a florada e garantir que os frutos vinguem sem abortar.`);
       }
     });
 
-    // 3. Dica de Calor Extremo e Palhada
+    // 5. Manejo Prático de Terra com Palhada vs. Sol Forte
     if (tmax >= 32) {
-      const tmaxArr = Math.round(tmax);
       const zonasSemPalhada = (S.zones || []).filter((z) => z.enabled && z.crop && !z.mulch);
       if (zonasSemPalhada.length > 0) {
         const nomesZ = zonasSemPalhada.map((z) => z.nome.split('—')[0].trim()).join(' e ');
-        dicas.push(`☀️ *Calor forte hoje (${tmaxArr}°C):* ${nomesZ} ainda está com a terra descoberta. Cobrir com palhada seca (bagaço ou capim seco) corta a perda d'água do solo em 15% e protege a raiz do sol quente!`);
-      } else {
-        dicas.push(`☀️ *Calor de ${tmaxArr}°C esperado:* Graças à palhada nos canteiros, as raízes estão blindadas contra o sol das 12h às 15h até o turno da tarde (16h).`);
+        dicas.push(`☀️ *Sol quente previsto (${tmaxArr}°C):* ${nomesZ} está com solo descoberto. Cobrir com palhada seca (capim seco ou restolho) segura a umidade das 04h até o turno das 16h e reduz em 15% o gasto de água.`);
       }
     }
 
-    // 4. Dica de Vento Seco do Seridó
-    if (wind >= 22) {
-      dicas.push(`💨 *Vento seco do Seridó (${Math.round(wind)} km/h):* O vento acelera o ressecamento das folhas. O gotejo no pé evita deriva e perda por evaporação em comparação com aspersores.`);
-    }
-
-    // 5. Dica de Chuva Prevista
+    // 6. Chuva na Roça
     if (rainProb >= 40) {
-      dicas.push(`🌧️ *Chance de chuva hoje (${rainProb}%):* Se cair chuva no sítio, lembre de tocar em *"☔ Choveu Aqui"* no app para descontar do balde e economizar a caixa d'água!`);
+      dicas.push(`🌧️ *Previsão de chuva hoje (${rainProb}% de chance):* Se chover na roça, anote no app pelo botão *"☔ Choveu Aqui"* para o sistema guardar a água da caixa de 5.000 L para os dias secos.`);
     }
 
-    // 6. Dica de Ponto de Colheita
-    (S.zones || []).forEach((z) => {
-      if (!z.enabled || !z.crop) return;
-      const cd = Core.cropDay(z.crop.id, Core.daysBetween(z.crop.plantio, Core.isoDate(new Date())));
-      if (cd && cd.diasParaColher <= 3 && cd.crop.colheita) {
-        dicas.push(`✂️ *Ponto de colheita do ${cd.crop.nome}:* ${cd.crop.colheita}`);
-      }
-    });
-
-    // Fallback: Dica Geral de Economia
-    if (!dicas.length) {
-      dicas.push(`🌱 *Manejo Autônomo:* As regas divididas em 2 turnos (04h e 16h) garantem que as plantas se hidratem nas horas mais frescas e dão tempo para o poço artesiano recompor a caixa.`);
-    }
-
-    return dicas[0];
+    return dicas.length > 0
+      ? dicas[0]
+      : `🌱 *Lavoura em pleno desenvolvimento:* Todos os canteiros receberam a lâmina calculada para hoje dentro da cota programada.`;
   }
 
   /**
-   * 🌅 BOLETIM MATINAL (Para envio às 06:00, pós 1º turno)
+   * ☀️ BOLETIM OPERACIONAL DA MANHÃ (Envio automático às 06:00 para o grupo)
    */
   function gerarResumoManha(S, P, dataStr) {
     const hoje = dataStr || Core.isoDate(new Date());
@@ -104,7 +104,7 @@
 
     (S.zones || []).forEach((z, idx) => {
       if (!z.enabled || !z.crop) {
-        linhasZonas.push(`• *Zona ${z.id}:* 🟫 Canteiro livre (0 L)`);
+        linhasZonas.push(`• *${z.nome.split('—')[0].trim()}:* 🟫 Canteiro livre (em descanso / preparo)`);
         return;
       }
       const cd = Core.cropDay(z.crop.id, Core.daysBetween(z.crop.plantio, hoje));
@@ -114,36 +114,35 @@
 
       const emoji = cd?.crop?.emoji || '🌱';
       const nomeCultura = cd?.crop?.nome || z.crop.id;
-      const faseStr = cd ? `DAP ${cd.dap} · ${cd.nomeFase}` : 'Em cultivo';
+      const faseStr = cd ? `DAP ${cd.dap} (${cd.nomeFase})` : 'Em cultivo';
+      const colheitaAviso = cd && cd.diasParaColher <= 10 ? ` ➔ *Colheita em ${cd.diasParaColher}d!*` : '';
 
-      linhasZonas.push(`• *${z.nome.split('—')[0].trim()}:* ${emoji} *${nomeCultura}* (${faseStr})\n  💧 ~${fmtL(volTurnoManha)} entregues no turno das 04:00`);
+      linhasZonas.push(`• *${z.nome.split('—')[0].trim()}:* ${emoji} *${nomeCultura}* — ${faseStr}${colheitaAviso}\n  💧 Rega matinal: *${fmtL(volTurnoManha)}*`);
     });
 
-    const proTip = gerarProTip(S, P, clima);
+    const proTip = gerarProTipOperacional(S, P, clima);
 
-    return `☀️ *BOM DIA, FAMÍLIA! BOLETIM DO SABIÁ* 🦅
+    return `☀️ *BOLETIM DO SÍTIO · 1º TURNO CONCLUÍDO* 🦅
 📍 *${S.site?.nome || 'Sítio — Seridó (PB)'}* · ${hoje.split('-').reverse().join('/')}
 
-🌱 *1º Turno da Manhã Concluído:*
+🌱 *Status das Culturas na Roça:*
 ${linhasZonas.join('\n')}
 
-📊 *Situação Hídrica:*
-• 💧 *Volume matinal:* ~${fmtL(totalManha)} aplicados
-• 🚰 *Cota diária:* ${fmtL(cotaDiaria)} reservada para hoje
-• 🪣 *Caixa 5.000 L:* ${fmtL(nivelCaixa)} (${pctCaixa}%)
+📊 *Água & Reservatório:*
+• 💧 Regado na fresca das 04h: *${fmtL(totalManha)}*
+• 🚰 Cota reservada p/ o dia: *${fmtL(cotaDiaria)}*
+• 🪣 Nível da Caixa de 5.000 L: *${fmtL(nivelCaixa)}* (${pctCaixa}%)
 
-🌤️ *Previsão do Tempo:*
-• 🌡️ Máxima: *${Math.round(clima.tmax ?? 33)}°C* | Mínima: *${Math.round(clima.tmin ?? 22)}°C*
-• 💨 Vento: *${Math.round(clima.wind ?? 18)} km/h* ${clima.rain_prob >= 30 ? `| 🌧️ *${clima.rain_prob}% de chuva*` : ''}
+🌤️ *Tempo Hoje:* Máx: *${Math.round(clima.tmax ?? 33)}°C* | Vento: *${Math.round(clima.wind ?? 18)} km/h* ${clima.rain_prob >= 30 ? `| 🌧️ *${clima.rain_prob}% de chuva*` : ''}
 
-💡 *Pro Tip Agronômica:*
+💡 *Recomendação Operacional da Lavoura:*
 ${proTip}
 
-👉 *Próximo turno:* 🌇 Hoje às 16:00 (Turno da Tarde)`;
+👉 *2º Turno de rega agendado para o entardecer às 16:00.*`;
   }
 
   /**
-   * 🌙 BOLETIM DO ENTARDECER (Para envio às 18:00, pós 2º turno)
+   * 🌙 FECHAMENTO OPERACIONAL DO ENTARDECER (Envio automático às 18:00 para o grupo)
    */
   function gerarResumoTarde(S, P, dataStr, totalEntregueDiaL) {
     const hoje = dataStr || Core.isoDate(new Date());
@@ -162,7 +161,7 @@ ${proTip}
     const linhasZonas = [];
     (S.zones || []).forEach((z, idx) => {
       if (!z.enabled || !z.crop) {
-        linhasZonas.push(`• *Zona ${z.id}:* 🟫 Canteiro livre (0 L)`);
+        linhasZonas.push(`• *${z.nome.split('—')[0].trim()}:* 🟫 Canteiro livre`);
         return;
       }
       const cd = Core.cropDay(z.crop.id, Core.daysBetween(z.crop.plantio, hoje));
@@ -170,26 +169,26 @@ ${proTip}
       const volTotalZona = dadosZona ? Math.round(dadosZona.litros) : 0;
       const emoji = cd?.crop?.emoji || '🌱';
       const nomeCultura = cd?.crop?.nome || z.crop.id;
-      linhasZonas.push(`• *${z.nome.split('—')[0].trim()}:* ${emoji} *${nomeCultura}* — ${fmtL(volTotalZona)} total no dia`);
+      linhasZonas.push(`• *${z.nome.split('—')[0].trim()}:* ${emoji} *${nomeCultura}* ➔ Total recebido hoje: *${fmtL(volTotalZona)}*`);
     });
 
-    return `🌙 *BOA NOITE, FAMÍLIA! FECHAMENTO DO SABIÁ* 🦅
+    return `🌙 *FECHAMENTO DO DIA NO SÍTIO* 🦅
 📍 *${S.site?.nome || 'Sítio — Seridó (PB)'}* · ${hoje.split('-').reverse().join('/')}
 
-✅ *Regas do Dia Finalizadas com Sucesso:*
+✅ *Irrigações do dia concluídas com sucesso:*
 ${linhasZonas.join('\n')}
 
-📈 *Balanço da Água:*
-• 💧 *Total aplicado:* *${fmtL(gastoReal)}* (nos 2 turnos 04h/16h)
-• 🎯 *Cota autorizada:* *${fmtL(cotaDiaria)}*
-• 💚 *Economia de cota guardada:* *${fmtL(saldoCota)}*
-• 🪣 *Nível atual da Caixa:* *${fmtL(nivelCaixa)}* (${pctCaixa}%)
+📈 *Balanço Hídrico:*
+• 💧 Água total aplicada hoje: *${fmtL(gastoReal)}* (Turno 04h + Turno 16h)
+• 🎯 Cota autorizada: *${fmtL(cotaDiaria)}*
+• 💚 Economia guardada na caixa: *${fmtL(saldoCota)}*
+• 🪣 Caixa de 5.000 L: *${fmtL(nivelCaixa)}* (${pctCaixa}%)
 
-🌅 O SABIÁ entrará em repouso noturno e iniciará o próximo ciclo amanhã pontualmente às *04:00* no fresco da madrugada!`;
+🌅 Todas as válvulas estão fechadas. Próxima rega automática programada para amanhã às *04:00*.`;
   }
 
   /**
-   * 🚨 ALERTAS DE EMERGÊNCIA
+   * 🚨 ALERTAS DE EMERGÊNCIA REAIS
    */
   function gerarAlertaEmergencia(tipo, dados = {}) {
     const nomeSitio = dados.siteNome || 'Sítio — Seridó (PB)';
@@ -198,66 +197,54 @@ ${linhasZonas.join('\n')}
     switch (tipo) {
       case 'tubo_seco':
       case 'bomba_parada':
-        return `🚨 *ALERTA URGENTE DO SABIÁ: CANO SECO / BOMBA PARADA* 🚨
+        return `🚨 *ALERTA URGENTE NO SÍTIO: CANO SECO OU BOMBA PARADA* 🚨
 📍 *${nomeSitio}* · ${dataHora}
 
-⚠️ *Problema Detectado:*
-A válvula da *Zona ${dados.zona || 1}* abriu para regar, mas o Sensor de Vazão registrou *0 L/min* (sem água passando na tubulação).
+⚠️ *O que aconteceu:*
+A válvula da *Zona ${dados.zona || 1}* abriu para irrigar, mas o sensor registrou *0 L/min* (nenhuma água passando pela tubulação).
 
-🛠️ *O que fazer:*
-1. Verifique se a bomba d'água auxiliar está ligada.
-2. Confira se o registro geral da saída da caixa de 5.000 L está aberto.
-3. Cheque se há ar ou entupimento na sucção.
+🛠️ *Ações necessárias no sítio:*
+1. Verificar se a bomba auxiliar do poço/caixa está ligada.
+2. Conferir se o registro geral da saída da caixa de 5.000 L está aberto.
+3. Checar se houve entupimento grosso ou entrada de ar na sucção.
 
-🛡️ *O SABIÁ desligou o sistema preventivamente para não queimar a bomba a seco.*`;
+🛡️ *O SABIÁ desligou o sistema imediatamente para proteger a bomba contra queima a seco.*`;
 
       case 'caixa_critica':
-        return `🪣 *ALERTA: NÍVEL DA CAIXA D'ÁGUA CRÍTICO* 🪣
+        return `🪣 *ALERTA URGENTE: NÍVEL DA CAIXA CRÍTICO* 🪣
 📍 *${nomeSitio}* · ${dataHora}
 
-⚠️ O volume da caixa de 5.000 L caiu para *${fmtL(dados.nivel_L || 1200)}* (*${dados.pct || 24}%*), atingindo a reserva mínima de segurança.
+⚠️ O volume da caixa d'água caiu para *${fmtL(dados.nivel_L || 1000)}* (*${dados.pct || 20}%*), atingindo o limite de segurança da propriedade.
 
-🛑 *Medida Automática:*
-O SABIÁ pausou as regas automáticas para proteger as torneiras e encanamentos.
-👉 Acione a bomba do poço artesiano para restabelecer o nível.`;
+🛑 *Medida adotada:*
+O SABIÁ suspendeu as irrigações automáticas para não esgotar as torneiras da casa.
+👉 Ligar a bomba do poço artesiano para reabastecer a caixa.`;
 
       case 'filtro_sujo':
-        return `🧹 *AVISO DE MANUTENÇÃO: FILTRO 120 MESH* 🧹
+        return `🧹 *AVISO DE MANUTENÇÃO: LAVAR FILTRO 120 MESH* 🧹
 📍 *${nomeSitio}* · ${dataHora}
 
-A saúde do filtro de discos caiu para *${dados.pct || 65}%* (perda de pressão detectada pelo sensor de vazão).
-👉 Recomendada a lavagem dos anéis do filtro para garantir a uniformidade dos gotejadores.`;
+A saúde do filtro de discos caiu para *${dados.pct || 65}%* (perda de vazão detectada no gotejamento).
+👉 Na próxima visita ao sítio, favor desrosquear o filtro e lavar os anéis para manter a pressão dos gotejadores.`;
 
-      case 'sabia_offline':
-        return `📡 *AVISO: SABIÁ SEM SINAL* 📡
+      case 'sabia_offline_24h':
+        return `📡 *ALERTA OPERACIONAL: SABIÁ SEM SINAL HÁ MAIS DE 24 HORAS* 📡
 📍 *${nomeSitio}* · ${dataHora}
 
-O servidor autônomo SABIÁ está sem comunicação com a internet há mais de 3 minutos (queda de Wi-Fi ou falta de energia na tomada da bancada).
-👉 O SABIÁ continua regando normalmente pelo relógio interno, mas o app online só atualizará após a rede voltar.`;
+⚠️ O dispositivo de campo completou *mais de 24 horas consecutivas sem conectar à internet*.
+💡 *Fique tranquilo:* O SABIÁ continua executando as regas pelo relógio interno, mas não está recebendo novas previsões climáticas nem transmitindo o gasto do dia.
+👉 Quando alguém for ao sítio, favor checar se o roteador Wi-Fi caiu ou se o disjuntor da bancada desarmou.`;
 
       default:
-        return `ℹ️ *AVISO DO SISTEMA SABIÁ:* ${dados.msg || 'Aviso operacional registrado.'}`;
+        return `ℹ️ *Aviso do Sítio:* ${dados.msg || 'Registro operacional.'}`;
     }
-  }
-
-  /**
-   * Gera o link direto para disparar no WhatsApp (Web ou App móvel).
-   */
-  function gerarLinkWhatsApp(texto, numeroOpcional = '') {
-    const textoCodificado = encodeURIComponent(texto);
-    if (numeroOpcional) {
-      const numLimpo = String(numeroOpcional).replace(/\D/g, '');
-      return `https://wa.me/${numLimpo}?text=${textoCodificado}`;
-    }
-    return `https://api.whatsapp.com/send?text=${textoCodificado}`;
   }
 
   const api = {
-    gerarProTip,
+    gerarProTipOperacional,
     gerarResumoManha,
     gerarResumoTarde,
     gerarAlertaEmergencia,
-    gerarLinkWhatsApp,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

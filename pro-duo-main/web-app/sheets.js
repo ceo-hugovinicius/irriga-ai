@@ -1238,9 +1238,9 @@ function abrirModalSabia() {
 }
 
 /* ============================================================================
- * 9. MODAL DE NOTIFICAÇÕES & WHATSAPP DO SÍTIO
+ * 9. MODAL DE AUTOMAÇÃO · ROBÔ DO WHATSAPP (GRUPO DA FAMÍLIA)
  * ========================================================================== */
-function abrirModalWhatsApp(aba = 'manha', subtipoAlerta = 'tubo_seco') {
+function abrirModalWhatsApp(aba = 'robo', subtipoAlerta = 'tubo_seco') {
   const Notif = window.SabiaNotificacoes;
   if (!Notif) {
     toast('⚠️ Módulo de notificações carregando...');
@@ -1260,184 +1260,171 @@ function abrirModalWhatsApp(aba = 'manha', subtipoAlerta = 'tubo_seco') {
     textoMsg = Notif.gerarAlertaEmergencia(subtipoAlerta, {
       siteNome: S.site?.nome,
       zona: 1,
-      nivel_L: Math.round(S.tank?.level_L ?? 1150),
-      pct: Math.round(100 * (S.tank?.level_L ?? 1150) / (S.tank?.capacity || 5000)),
+      nivel_L: Math.round(S.tank?.level_L ?? 1000),
+      pct: Math.round(100 * (S.tank?.level_L ?? 1000) / (S.tank?.capacity || 5000)),
       pctFiltro: Math.round(S.filtro?.pct ?? 65),
     });
   }
 
-  const linkZap = Notif.gerarLinkWhatsApp(textoMsg, S.site?.whatsapp_destino || '');
+  const botConfigurado = !!(S.site?.webhook_whatsapp);
 
-  window._copiarMsgWhatsApp = function() {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(textoMsg).then(() => {
-        toast('📋 Mensagem copiada! Abra o WhatsApp e cole no grupo.');
-      }).catch(() => {
-        toast('📋 Selecione e copie o texto acima.');
-      });
-    } else {
-      toast('📋 Copie o texto do balão acima.');
-    }
-  };
-
-  window._dispararMqttNotificacao = function() {
-    if (window.MQTT_CLIENT && window.MQTT_CONNECTED) {
-      try {
-        const payload = JSON.stringify({
-          tipo: aba,
-          subtipo: subtipoAlerta,
-          texto: textoMsg,
-          site: S.site?.nome,
-          ts: Date.now()
-        });
-        const msg = new Paho.MQTT.Message(payload);
-        msg.destinationName = 'irriga-ai/ceo-hugovinicius/notify';
-        msg.qos = 1;
-        window.MQTT_CLIENT.send(msg);
-        toast('☁️ Notificação despachada no tópico MQTT de avisos!');
-      } catch (e) {
-        toast('⚠️ Falha ao despachar via MQTT.');
-      }
-    } else {
-      toast('⚠️ Conexão MQTT offline no momento.');
-    }
-  };
-
-  window._salvarConfigWhatsApp = function() {
+  window._salvarConfigRoboWhatsApp = function() {
     if (!S.site) S.site = {};
     const urlInput = document.getElementById('zap-webhook-url');
     const destInput = document.getElementById('zap-dest-number');
-    const autoCheck = document.getElementById('zap-auto-check');
+    const keyInput = document.getElementById('zap-api-key');
+    const autoManha = document.getElementById('zap-check-manha');
+    const autoTarde = document.getElementById('zap-check-tarde');
+    const autoEmerg = document.getElementById('zap-check-emerg');
 
     if (urlInput) S.site.webhook_whatsapp = urlInput.value.trim();
     if (destInput) S.site.whatsapp_destino = destInput.value.trim();
-    if (autoCheck) S.site.whatsapp_auto_alerts = autoCheck.checked;
+    if (keyInput) S.site.whatsapp_api_key = keyInput.value.trim();
+    if (autoManha) S.site.whatsapp_auto_manha = autoManha.checked;
+    if (autoTarde) S.site.whatsapp_auto_tarde = autoTarde.checked;
+    if (autoEmerg) S.site.whatsapp_auto_emergencias = autoEmerg.checked;
+    S.site.whatsapp_bot_ativo = true;
 
     salvarConfigCloud();
     salvarLocal();
-    toast('💾 Configurações de WhatsApp salvas com sucesso!');
-    abrirModalWhatsApp('webhook');
+    toast('💾 Configurações do Robô salvas! Mensagens ativas no grupo.');
+    abrirModalWhatsApp('robo');
   };
 
-  window._testarWebhookWhatsApp = async function() {
+  window._testarDisparoNoGrupo = async function(customTexto = null) {
     const url = S.site?.webhook_whatsapp;
     if (!url) {
-      toast('⚠️ Preencha a URL do Webhook antes de testar.');
+      toast('⚠️ Preencha a URL do Webhook do WhatsApp antes de testar.');
       return;
     }
-    toast('🔔 Disparando teste para o Webhook...');
+    const envio = customTexto || textoMsg || `🔔 *TESTE OPERACIONAL DO SABIÁ* 🦅\n📍 *${S.site?.nome || 'Sítio'}*\n\nConexão com o grupo da família realizada com sucesso! O robô enviará boletins diários às 06:00 e 18:00.`;
+    toast('🔔 Disparando mensagem para o grupo do WhatsApp...');
     try {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sender: 'SABIÁ Irriga.ai',
-          tipo: aba,
-          texto: textoMsg || '🔔 Teste de conexão do SABIÁ com o WhatsApp realizado com sucesso!',
-          ts: Date.now()
-        })
-      });
-      if (resp.ok) toast('✅ Teste entregue com sucesso ao Webhook!');
-      else toast(`⚠️ Webhook respondeu com status ${resp.status}`);
+      if (typeof dispararWebhookWhatsApp === 'function') {
+        const ok = await dispararWebhookWhatsApp(envio, 'teste');
+        if (ok) {
+          toast('✅ Mensagem entregue no grupo do WhatsApp com sucesso!');
+          if (typeof audit === 'function') audit('app', '🔔 Mensagem de teste enviada ao grupo do WhatsApp', 'notificacao');
+        } else {
+          toast('⚠️ Gateway respondeu com falha. Verifique URL e Token.');
+        }
+      }
     } catch (e) {
-      toast('❌ Falha ao conectar ao Webhook (verifique a URL ou CORS).');
+      toast('❌ Falha ao conectar ao serviço de WhatsApp.');
     }
   };
 
   abrirModal(`
     <div class="row between" style="margin-bottom:8px;align-items:center">
       <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:28px">📲</span>
+        <span style="font-size:30px">🤖</span>
         <div>
-          <h3 style="margin:0">WhatsApp & Avisos da Roça</h3>
-          <div class="t12 mute">Boletins diários, Pro Tips e alertas para o grupo da família</div>
+          <h3 style="margin:0">Robô do WhatsApp (Grupo da Família)</h3>
+          <div class="t12 mute">Envio 100% automático dos boletins da roça e emergências</div>
         </div>
       </div>
+      <span class="pill ${botConfigurado ? 'green' : 'amber'}" style="font-size:11px;font-weight:700">
+        ${botConfigurado ? '🟢 Bot Conectado' : '🟠 Aguardando URL'}
+      </span>
     </div>
 
     <!-- Navegação de Abas -->
     <div class="seg" style="margin:12px 0 14px 0">
+      <button class="${aba === 'robo' ? 'sel' : ''}" onclick="abrirModalWhatsApp('robo')">⚙️ Robô & Grupo</button>
       <button class="${aba === 'manha' ? 'sel' : ''}" onclick="abrirModalWhatsApp('manha')">☀️ Manhã (06h)</button>
       <button class="${aba === 'tarde' ? 'sel' : ''}" onclick="abrirModalWhatsApp('tarde')">🌙 Noite (18h)</button>
       <button class="${aba === 'alertas' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', '${subtipoAlerta}')">🚨 Alertas</button>
-      <button class="${aba === 'webhook' ? 'sel' : ''}" onclick="abrirModalWhatsApp('webhook')">⚙️ Robô</button>
     </div>
 
-    ${aba === 'alertas' ? `
-      <!-- Seletor de Tipo de Alerta -->
-      <div style="margin-bottom:12px">
-        <label class="t12 b mute" style="display:block;margin-bottom:6px">Selecione o Alerta para Visualizar ou Testar:</label>
-        <div class="seg" style="flex-wrap:wrap">
-          <button class="${subtipoAlerta === 'tubo_seco' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'tubo_seco')">🚨 Tubo Seco</button>
-          <button class="${subtipoAlerta === 'caixa_critica' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'caixa_critica')">🪣 Caixa Baixa</button>
-          <button class="${subtipoAlerta === 'filtro_sujo' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'filtro_sujo')">🧹 Filtro 120M</button>
-          <button class="${subtipoAlerta === 'sabia_offline' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'sabia_offline')">📡 Sem Sinal</button>
+    ${aba === 'robo' ? `
+      <!-- Configurações do Bot / Webhook do Grupo -->
+      <div class="card" style="background:var(--sub);border:1px solid var(--line);padding:14px;margin-bottom:14px">
+        <div class="t13 b" style="margin-bottom:4px">👥 Conectar ao Grupo da Família</div>
+        <p class="t12 mute" style="margin-bottom:12px;line-height:1.5">
+          O bot entrega os boletins no grupo e fica em silêncio. Não responde mensagens (o site serve pra isso), deixando a família livre para conversar sobre as colheitas e vendas.
+        </p>
+
+        <div class="field">
+          <label>URL do Webhook / Gateway do WhatsApp</label>
+          <input id="zap-webhook-url" type="url" placeholder="Ex: https://api.callmebot.com/whatsapp.php ou https://sua-evolution-api.com/..." value="${esc(S.site?.webhook_whatsapp || '')}" />
+        </div>
+
+        <div class="field" style="margin-top:10px">
+          <label>ID do Grupo do WhatsApp (ou número)</label>
+          <input id="zap-dest-number" type="text" placeholder="Ex: 1203630XXXXX@g.us ou 5583999998888" value="${esc(S.site?.whatsapp_destino || '')}" />
+        </div>
+
+        <div class="field" style="margin-top:10px">
+          <label>Chave de API / Token do Gateway (opcional)</label>
+          <input id="zap-api-key" type="password" placeholder="Token ou apiKey do serviço" value="${esc(S.site?.whatsapp_api_key || '')}" />
+        </div>
+
+        <div class="list" style="margin-top:14px">
+          <div class="li" style="padding:8px 0;border-bottom:1px solid var(--line)">
+            <div>
+              <div class="t13 b">☀️ Boletim Matinal às 06:00</div>
+              <div class="t12 mute">Status da lavoura, DAP e Pro Tip agronômica do dia</div>
+            </div>
+            <input id="zap-check-manha" type="checkbox" style="width:20px;height:20px" ${S.site?.whatsapp_auto_manha !== false ? 'checked' : ''} />
+          </div>
+          <div class="li" style="padding:8px 0;border-bottom:1px solid var(--line)">
+            <div>
+              <div class="t13 b">🌙 Fechamento do Dia às 18:00</div>
+              <div class="t12 mute">Total regado, cota economizada e repouso noturno</div>
+            </div>
+            <input id="zap-check-tarde" type="checkbox" style="width:20px;height:20px" ${S.site?.whatsapp_auto_tarde !== false ? 'checked' : ''} />
+          </div>
+          <div class="li" style="padding:8px 0">
+            <div>
+              <div class="t13 b">🚨 Alertas Urgentes Imediatos</div>
+              <div class="t12 mute">Cano seco, bomba sem vazão ou caixa abaixo de 20%</div>
+            </div>
+            <input id="zap-check-emerg" type="checkbox" style="width:20px;height:20px" ${S.site?.whatsapp_auto_emergencias !== false ? 'checked' : ''} />
+          </div>
+        </div>
+
+        <div class="locked-note" style="margin-top:12px;font-size:12px">
+          🛡️ <b>Quedas de Internet:</b> Quedas rápidas de Wi-Fi não geram alertas para não incomodar a família. O aviso de conexão só é disparado se o SABIÁ passar <b>mais de 24 horas consecutivas</b> sem ping.
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
+          <button class="btn blue full" onclick="window._salvarConfigRoboWhatsApp()">
+            💾 Salvar Configurações
+          </button>
+          <button class="btn full" onclick="window._testarDisparoNoGrupo()">
+            🔔 Disparar Teste no Grupo
+          </button>
         </div>
       </div>
-    ` : ''}
+    ` : `
+      <!-- Prévia do Conteúdo Automático que o Robô Envia -->
+      ${aba === 'alertas' ? `
+        <div style="margin-bottom:12px">
+          <label class="t12 b mute" style="display:block;margin-bottom:6px">Selecione o Tipo de Alerta para Visualizar:</label>
+          <div class="seg" style="flex-wrap:wrap">
+            <button class="${subtipoAlerta === 'tubo_seco' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'tubo_seco')">🚨 Tubo Seco</button>
+            <button class="${subtipoAlerta === 'caixa_critica' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'caixa_critica')">🪣 Caixa Baixa</button>
+            <button class="${subtipoAlerta === 'filtro_sujo' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'filtro_sujo')">🧹 Filtro 120M</button>
+            <button class="${subtipoAlerta === 'sabia_offline_24h' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'sabia_offline_24h')">📡 Sem Sinal >24h</button>
+          </div>
+        </div>
+      ` : ''}
 
-    ${aba !== 'webhook' ? `
-      <!-- Visualizador no Estilo Balão do WhatsApp -->
       <div class="card" style="background:var(--sub);border:1px solid var(--line);padding:14px;border-radius:16px;margin-bottom:14px">
         <div class="row between" style="margin-bottom:8px;align-items:center">
           <span class="t12 mute b" style="text-transform:uppercase">
-            ${aba === 'manha' ? '🌅 Boletim Matinal + Pro Tip' : (aba === 'tarde' ? '🌙 Balanço do Entardecer' : '🚨 Aviso de Emergência')}
+            ${aba === 'manha' ? '☀️ O que o bot envia às 06:00' : (aba === 'tarde' ? '🌙 O que o bot envia às 18:00' : '🚨 Mensagem de emergência imediata')}
           </span>
-          <span class="pill green" style="font-size:11px;padding:2px 8px">Formato WhatsApp</span>
+          <span class="pill green" style="font-size:11px;padding:2px 8px">Disparo Automático</span>
         </div>
         <div style="background:#E7FCE3;color:#0F1D15;border-radius:12px;padding:14px 16px;border:1px solid #BCEAB8;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-height:280px;overflow-y:auto;box-shadow:0 1px 3px rgba(0,0,0,0.05);font-family:inherit">
 ${esc(textoMsg)}
         </div>
       </div>
 
-      <!-- Botões de Ação Imediata -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-        <a class="btn green full" href="${linkZap}" target="_blank" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:700">
-          <span>📲 Abrir no WhatsApp</span>
-        </a>
-        <button class="btn full" onclick="window._copiarMsgWhatsApp()">
-          📋 Copiar Mensagem
-        </button>
-      </div>
-
-      <button class="btn sm full" style="color:var(--blue);border:1px dashed var(--line);margin-bottom:12px" onclick="window._dispararMqttNotificacao()">
-        ☁️ Publicar no Tópico MQTT (Para Bots e Automações)
+      <button class="btn green full" style="font-weight:700;margin-bottom:10px" onclick="window._testarDisparoNoGrupo('${esc(textoMsg).replace(/'/g, "\\'")}')">
+        🔔 Disparar Este Boletim no Grupo Agora
       </button>
-    ` : `
-      <!-- Aba de Configuração do Webhook / Robô -->
-      <div class="card" style="background:var(--sub);border:1px solid var(--line);padding:14px;margin-bottom:14px">
-        <div class="t13 b" style="margin-bottom:6px">🤖 Automação e Bot de Mensagens</div>
-        <p class="t12 mute" style="margin-bottom:12px;line-height:1.5">
-          Conecte um serviço de WhatsApp (CallMeBot, Evolution API, Z-API ou n8n) para que o SABIÁ envie mensagens no grupo da família automaticamente quando houver emergência ou no fechamento dos turnos.
-        </p>
-
-        <div class="field">
-          <label>URL do Webhook (HTTP POST/GET)</label>
-          <input id="zap-webhook-url" type="url" placeholder="https://api.callmebot.com/... ou https://seu-webhook..." value="${esc(S.site?.webhook_whatsapp || '')}" />
-        </div>
-
-        <div class="field" style="margin-top:10px">
-          <label>Número do WhatsApp ou ID do Grupo (Opcional)</label>
-          <input id="zap-dest-number" type="text" placeholder="Ex: 5583999998888 ou 1203630@g.us" value="${esc(S.site?.whatsapp_destino || '')}" />
-        </div>
-
-        <div class="row between" style="margin-top:14px;align-items:center;background:var(--card);padding:10px 12px;border-radius:10px;border:1px solid var(--line)">
-          <div>
-            <div class="t13 b">Disparar Alertas de Emergência Sozinho</div>
-            <div class="t12 mute">Envia no grupo se o cano secar ou caixa atingir nível crítico</div>
-          </div>
-          <input id="zap-auto-check" type="checkbox" style="width:20px;height:20px" ${S.site?.whatsapp_auto_alerts !== false ? 'checked' : ''} />
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
-          <button class="btn blue full" onclick="window._salvarConfigWhatsApp()">
-            💾 Salvar Configurações
-          </button>
-          <button class="btn full" onclick="window._testarWebhookWhatsApp()">
-            🔔 Testar Disparo
-          </button>
-        </div>
-      </div>
     `}
 
     <button class="btn full" onclick="fecharModal()">Fechar</button>

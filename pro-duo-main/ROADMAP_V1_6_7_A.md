@@ -80,14 +80,21 @@
 
 ---
 
-## 📲 Task 5: Alertas, Boletins & Pro Tips no WhatsApp (`core/notificacoes-sabia.js`)
+## 📲 Task 5: Robô Autônomo de Mensagens para Grupo da Família no WhatsApp (`core/notificacoes-sabia.js` & `bot/`)
 
-- [x] **Motor de Notificações Agronômicas:**
-  - `gerarResumoManha`: Boletim do 1º turno das 04h com litros por zona, DAP da cultura, nível da caixa d'água, previsão do tempo e Pro Tip agronômica do dia.
-  - `gerarResumoTarde`: Fechamento do dia pós 2º turno das 16h com saldo de cota economizada e aviso de repouso noturno até as 04h.
-  - `gerarAlertaEmergencia`: Mensagens formatadas para tubulação seca / bomba parada, caixa d'água crítica (< 25%), manutenção do filtro 120 Mesh e SABIÁ sem sinal.
-- [x] **Interface PWA do WhatsApp:**
-  - Botão `📲 WhatsApp` no cabeçalho e atalhos em Ajustes e no Modal do SABIÁ.
-  - Visualizador estilo balão do WhatsApp com botão de 1 clique `[📲 Abrir no WhatsApp]` e `[📋 Copiar Mensagem]`.
-  - Configuração de Webhook (CallMeBot / Evolution API / Z-API / n8n) para disparo automático de emergências.
-  - Publicação no tópico MQTT `irriga-ai/ceo-hugovinicius/notify` para bots ouvintes.
+- [x] **Motor de Mensagens Agronômicas Autônomo:**
+  - `gerarResumoManha`: Boletim matinal das 06:00 com litros previstos, DAP (*Dias Após o Plantio*), fase atual da cultura, nível da caixa d'água, clima e Pro Tips de manejo.
+  - `gerarResumoTarde`: Fechamento do dia às 18:00 com total irrigado, cota economizada e confirmação de repouso noturno até as 04:00.
+  - `gerarAlertaEmergencia`: Mensagens formatadas exclusivamente para eventos críticos (cano seco/bomba parada, caixa crítica < 20%, filtro 120 Mesh).
+  - **Alerta de Conexão Estrito:** O alerta de falta de sinal é disparado **apenas se o SABIÁ passar mais de 24 horas consecutivas sem ping**, evitando spam por oscilações transitórias de Wi-Fi.
+  - **Pro Tips Agronômicas & Comerciais:**
+    - Aviso de proximidade da colheita (ex: "Faltam 2 dias para colher o Coentro! Hora de providenciar caixaria e fechar compradores").
+    - Explicações claras de manejo na reta final (ex: corte de água para concentração de açúcar °Brix no melão ou cura da casca da cebola).
+    - Sugestão de revisão de cota caso o balanço registre déficit hídrico consecutivo.
+- [x] **Automação 100% Silenciosa e Sem Cringe:**
+  - Eliminação de qualquer botão de "copiar texto" manual ou links `wa.me` para compartilhamento individual.
+  - Robô opera de forma estritamente unidirecional no grupo da família do WhatsApp: apenas entrega os boletins e alertas operacionais.
+  - Permite que a família utilize o grupo livremente para conversar sobre o sítio, organizar colheitas, vendas e visitas sem interferência de bots conversacionais.
+- [x] **Integração Dupla (PWA WebApp + Daemon Node.js):**
+  - **No WebApp (`app.js` e `sheets.js`):** Modal de configuração com status do robô, URL de webhook (Evolution API, Z-API, Baileys, CallMeBot), token de autenticação, caixas de ativação (06h, 18h, emergências), prévia do texto e botão de disparo imediato de teste no grupo. Verificação periódica automática a cada 30 segundos.
+  - **No Servidor / Daemon Standalone (`pro-duo-main/bot/`):** Script `bot-whatsapp.js` pronto para rodar como serviço contínuo (PM2, Docker ou systemd), monitorando tópicos MQTT e cron local para despacho autônomo mesmo com todas as abas do navegador fechadas.

@@ -34,7 +34,7 @@ function novoEstado() {
     historico: [], auditoria: [], pauseLog: [], boostLog: [], chuvaLocal: {}, manual: null,
     weather: { fetched: null, days: [], erro: null }, filtro: { pct: 96 },
     ui: { locked: true, dark: false },
-    security: { pin: '1234', enabled: true },
+    security: { pin: '1209', enabled: true },
     device: { url: '', online: false, lastSeen: null, status: null, telemetry: null },
     ultimoDiaFechado: C.addDays(hoje(), -1),
   });
@@ -67,7 +67,12 @@ function carregar() {
       if (!st.windows || !st.windows.dawn_start) {
         st.windows = { dawn_start: '04:00', end_dawn: '05:30', evening: '16:00', evening_hot: '16:30', pulse_max_min: 90, gap_min: 5 };
       }
-      if (!st.security) st.security = { pin: '1234', enabled: true };
+      if (!st.security) {
+        st.security = { pin: '1209', enabled: true };
+      } else if (st.security.pin === '1234' || !st.security.pin) {
+        st.security.pin = '1209';
+      }
+      try { localStorage.setItem('irriga_pin_backup', st.security.pin || '1209'); } catch (e) {}
       st.auditoria = (st.auditoria || []).map((a, idx) => ({
         id: a.id || ('ev_' + (a.ts || Date.now()) + '_' + idx),
         ...a,
@@ -155,7 +160,10 @@ function salvarConfigCloud() {
         soil: S.soil,
         site: S.site,
         tank: S.tank,
-        security: { enabled: S.security ? S.security.enabled !== false : true }, // Higienização: PIN NUNCA trafega no MQTT público
+        security: {
+          pin: S.security?.pin || localStorage.getItem('irriga_pin_backup') || '1209',
+          enabled: S.security ? S.security.enabled !== false : true
+        },
         manual: S.manual,
         boost: S.boost,
         pause: S.pause,
@@ -842,7 +850,12 @@ function iniciarMqttNuvem() {
           if (data.site) S.site = { ...S.site, ...data.site };
           if (data.tank) S.tank = { ...S.tank, ...data.tank };
           if (data.security) {
-            S.security = { ...(S.security || { pin: '1234' }), enabled: data.security.enabled !== false };
+            const pinRecebido = data.security.pin || S.security?.pin || localStorage.getItem('irriga_pin_backup') || '1209';
+            S.security = {
+              pin: pinRecebido,
+              enabled: data.security.enabled !== false
+            };
+            try { localStorage.setItem('irriga_pin_backup', pinRecebido); } catch (e) {}
           }
           if (data.hasOwnProperty('manual')) S.manual = data.manual;
           if (data.hasOwnProperty('boost')) S.boost = data.boost || { pct: 0, until: null };
@@ -1887,6 +1900,17 @@ window.addEventListener('pageshow', acordarApp);
 window.addEventListener('focus', acordarApp);
 
 async function iniciar() {
+  try {
+    localStorage.removeItem('irriga_pin_lockout_ts');
+    localStorage.removeItem('irriga_pin_attempts_cnt');
+  } catch (e) {}
+  if (!S.security || S.security.pin === '1234' || !S.security.pin) {
+    if (!S.security) S.security = { enabled: true };
+    S.security.pin = '1209';
+    salvarLocal();
+  }
+  try { localStorage.setItem('irriga_pin_backup', S.security.pin || '1209'); } catch (e) {}
+
   fecharDiasPendentes(); render();
   iniciarMqttNuvem(); // Inicia a conexão MQTT em tempo real via nuvem HiveMQ
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

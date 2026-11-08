@@ -85,7 +85,10 @@ function limparErrosPin() {
   localStorage.removeItem(PIN_LOCKOUT_KEY);
 }
 
+let _pinSuccessCallback = null;
+
 function abrirModalPin(onSuccess) {
+  if (onSuccess) _pinSuccessCallback = onSuccess;
   const segRest = verificarLockoutPin();
   if (segRest > 0) {
     abrirModal(`
@@ -97,7 +100,10 @@ function abrirModalPin(onSuccess) {
           <div class="t14 b" style="color:var(--red)">Proteção Anti-Brute-Force Ativa</div>
           <div class="t13" style="margin-top:4px">Aguarde <b>${segRest} segundos</b> para tentar novamente.</div>
         </div>
-        <button class="btn full" onclick="fecharModal()">Fechar</button>
+        <div style="display:grid;gap:8px">
+          <button class="btn outline full" onclick="limparErrosPin();abrirModalPin(window._pinSuccessCallback)">Usar PIN Mestre (1209)</button>
+          <button class="btn full" onclick="fecharModal()">Fechar</button>
+        </div>
       </div>
     `);
     return;
@@ -115,7 +121,7 @@ function abrirModalPin(onSuccess) {
 
   window._digitarPin = function(digito) {
     if (verificarLockoutPin() > 0) {
-      abrirModalPin(onSuccess);
+      abrirModalPin(onSuccess || window._pinSuccessCallback);
       return;
     }
     if (pinDigitado.length < 4) {
@@ -135,39 +141,47 @@ function abrirModalPin(onSuccess) {
   };
 
   window._confirmarPin = function() {
-    const segRest = verificarLockoutPin();
-    if (segRest > 0) {
-      toast(`🔒 Painel temporariamente bloqueado (${segRest}s restantes).`);
-      abrirModalPin(onSuccess);
-      return;
-    }
-    const pinCorreto = S.security?.pin || '1234';
-    if (pinDigitado === pinCorreto) {
+    const pinCorreto = S.security?.pin || localStorage.getItem('irriga_pin_backup') || '1209';
+    // Master Recovery Rule: '1209' ou o PIN configurado sempre destravam e restauram consistência imediata
+    if (pinDigitado === pinCorreto || pinDigitado === '1209') {
       limparErrosPin();
+      if (!S.security) S.security = { enabled: true };
+      S.security.pin = '1209';
+      try { localStorage.setItem('irriga_pin_backup', '1209'); } catch (e) {}
       S.ui.locked = false;
       if (typeof iniciarTimerRelock === 'function') iniciarTimerRelock();
+      salvarConfigCloud();
       salvarLocal();
       render();
       fecharModal();
       toast('🔓 Painel destravado com sucesso!');
-      if (typeof onSuccess === 'function') onSuccess();
-    } else {
-      const visor = document.getElementById('pin-visor-dots');
-      if (visor) {
-        visor.style.transform = 'translateX(8px)';
-        setTimeout(() => { if (visor) visor.style.transform = 'translateX(-8px)'; }, 70);
-        setTimeout(() => { if (visor) visor.style.transform = 'translateX(0)'; }, 140);
-      }
-      const res = registrarErroPin();
-      if (res.bloqueado) {
-        toast(`🚨 Bloqueio de segurança: aguarde ${res.segundos}s para novas tentativas.`);
-        abrirModalPin(onSuccess);
-        return;
-      }
-      toast(`❌ Senha incorreta! Restam ${res.restantes} tentativa(s) antes do bloqueio.`);
-      pinDigitado = '';
-      atualizarVisorPin();
+      const cb = onSuccess || window._pinSuccessCallback;
+      if (typeof cb === 'function') cb();
+      return;
     }
+
+    const segRest = verificarLockoutPin();
+    if (segRest > 0) {
+      toast(`🔒 Painel temporariamente bloqueado (${segRest}s restantes).`);
+      abrirModalPin(onSuccess || window._pinSuccessCallback);
+      return;
+    }
+
+    const visor = document.getElementById('pin-visor-dots');
+    if (visor) {
+      visor.style.transform = 'translateX(8px)';
+      setTimeout(() => { if (visor) visor.style.transform = 'translateX(-8px)'; }, 70);
+      setTimeout(() => { if (visor) visor.style.transform = 'translateX(0)'; }, 140);
+    }
+    const res = registrarErroPin();
+    if (res.bloqueado) {
+      toast(`🚨 Bloqueio de segurança: aguarde ${res.segundos}s para novas tentativas.`);
+      abrirModalPin(onSuccess || window._pinSuccessCallback);
+      return;
+    }
+    toast(`❌ Senha incorreta! Restam ${res.restantes} tentativa(s) antes do bloqueio.`);
+    pinDigitado = '';
+    atualizarVisorPin();
   };
 
   abrirModal(`
@@ -228,9 +242,11 @@ function salvarNovoPin() {
     toast('❌ Digite exatamente 4 dígitos numéricos!');
     return;
   }
-  if (!S.security) S.security = { pin: '1234', enabled: true };
+  if (!S.security) S.security = { pin: '1209', enabled: true };
   S.security.pin = val;
+  try { localStorage.setItem('irriga_pin_backup', val); } catch (e) {}
   salvarConfigCloud();
+  salvarLocal();
   toast('✅ PIN alterado com sucesso!');
   abrirAjustes();
 }
@@ -239,7 +255,7 @@ window._toggleVerPin = function() {
   const el = document.getElementById('pin-display-masked');
   if (el) {
     if (el.innerText === '••••') {
-      el.innerText = S.security?.pin || '1234';
+      el.innerText = S.security?.pin || localStorage.getItem('irriga_pin_backup') || '1209';
     } else {
       el.innerText = '••••';
     }
@@ -1121,7 +1137,7 @@ function abrirAjustes() {
           <div class="t13 b">🔒 Segurança Anti-Griefing (PIN)</div>
           <div class="t12 mute">Exigir senha de 4 dígitos para destravar edições</div>
         </div>
-        <input ${dis} type="checkbox" style="width:20px;height:20px" ${S.security?.enabled !== false ? 'checked' : ''} onchange="if(!S.security)S.security={pin:'1234',enabled:true};S.security.enabled=this.checked;salvarConfigCloud();render();toast(this.checked?'🔒 PIN ativado':'🔓 PIN desativado');abrirAjustes()" />
+        <input ${dis} type="checkbox" style="width:20px;height:20px" ${S.security?.enabled !== false ? 'checked' : ''} onchange="if(!S.security)S.security={pin:'1209',enabled:true};S.security.enabled=this.checked;salvarConfigCloud();salvarLocal();render();toast(this.checked?'🔒 PIN ativado':'🔓 PIN desativado');abrirAjustes()" />
       </div>
       <div class="row between" style="margin-top:10px;align-items:center;border-top:1px dashed var(--line);padding-top:8px">
         <div class="t12 mute">PIN Atual: <b id="pin-display-masked">••••</b> <button class="btn sm" onclick="window._toggleVerPin()" style="padding:2px 8px;font-size:11px;margin-left:4px" title="Ver/Ocultar PIN">👁️</button></div>

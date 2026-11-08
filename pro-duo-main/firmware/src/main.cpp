@@ -604,6 +604,9 @@ void configurarRotasHttp() {
         doc["active_rem_L"]= activeZoneIdx >= 0 ? max(0.0f, activeTargetLiters - (zones[activeZoneIdx].delivered_today_L - activeStartLiters)) : 0.0f;
         doc["queue_z1_L"] = queueLiters[0];
         doc["queue_z2_L"] = queueLiters[1];
+        doc["z1_deliv_L"] = zones[0].delivered_today_L;
+        doc["z2_deliv_L"] = zones[1].delivered_today_L;
+        doc["tot_deliv_L"]= zones[0].delivered_today_L + zones[1].delivered_today_L;
         doc["alert"]      = lastAlertMsg;
         String out;
         serializeJson(doc, out);
@@ -669,6 +672,9 @@ void publicarStatusMqtt() {
     doc["active_rem_L"]= activeZoneIdx >= 0 ? max(0.0f, activeTargetLiters - (zones[activeZoneIdx].delivered_today_L - activeStartLiters)) : 0.0f;
     doc["queue_z1_L"] = queueLiters[0];
     doc["queue_z2_L"] = queueLiters[1];
+    doc["z1_deliv_L"] = zones[0].delivered_today_L;
+    doc["z2_deliv_L"] = zones[1].delivered_today_L;
+    doc["tot_deliv_L"]= zones[0].delivered_today_L + zones[1].delivered_today_L;
     doc["alert"]      = lastAlertMsg;
     String out;
     serializeJson(doc, out);

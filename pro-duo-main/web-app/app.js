@@ -252,13 +252,68 @@ function linhaDoTempo(P) {
 }
 
 function regandoAgora(ev) {
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  const telemetry = S.device?.telemetry;
+
+  // 1. Se o ESP32 está online, a verdade física absoluta das válvulas vem da telemetria do hardware
+  if (espOnline && telemetry && typeof telemetry.active_zone === 'number') {
+    if (telemetry.active_zone <= 0) return null;
+    const litRest = typeof telemetry.active_rem_L === 'number' ? telemetry.active_rem_L : 0;
+    return {
+      zona: telemetry.active_zone,
+      litros: litRest,
+      litrosRestantes: litRest,
+      manual: true,
+      ts: Date.now() - 1000,
+      te: Date.now() + 60000,
+    };
+  }
+
+  // 2. Se o ESP32 está offline (ou desligado), o hardware está sem energia/comunicação!
+  // Nenhuma válvula está aberta e nenhuma água é derramada no campo.
+  if (!espOnline) {
+    return null;
+  }
+
+  // 3. Fallback para simulação local sem hardware
   const n = Date.now();
   return ev.find((e) => e.ts <= n && e.te > n && (e.manual || !pausadoEm(e.ts))) || null;
 }
 
-const manualLitrosHoje = () => (S.manual && S.manual.dia === hoje() ? (S.manual.litrosTotal || 0) : 0);
+const manualLitrosHoje = () => {
+  if (!S.manual || S.manual.dia !== hoje()) return 0;
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  const telemetry = S.device?.telemetry;
+
+  // Se o ESP32 está online e medindo pelo sensor Hall SF1, usa o volume real entregue
+  if (espOnline && telemetry && typeof telemetry.tot_deliv_L === 'number') {
+    return telemetry.tot_deliv_L;
+  }
+  // Se o ESP32 está offline, NÃO computa litros da fila como gastos! A cota diária é protegida contra consumo fantasma.
+  if (!espOnline) {
+    return (telemetry && typeof telemetry.tot_deliv_L === 'number') ? telemetry.tot_deliv_L : 0;
+  }
+  // Fallback para simulação pura
+  const n = Date.now();
+  return (S.manual.eventos || [])
+    .filter((e) => e.ts < n)
+    .reduce((s, e) => s + e.litros * Math.min(1, Math.max(0, (n - e.ts) / (e.minutos * 60000))), 0);
+};
 
 const usadoHoje = () => {
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  const telemetry = S.device?.telemetry;
+
+  // Se há medição física de sensor do ESP32, ela é a verdade soberana do dia
+  if (telemetry && typeof telemetry.tot_deliv_L === 'number' && telemetry.tot_deliv_L > 0) {
+    return telemetry.tot_deliv_L;
+  }
+
+  // Se o ESP32 está offline e não houve entrega física anterior, 0 L foram gastos
+  if (!espOnline && (!telemetry || !telemetry.tot_deliv_L)) {
+    return 0;
+  }
+
   const P = planos(), t = hoje(), n = Date.now();
   let l = P.pHoje.eventos.filter((e) => absTs(t, e.inicioMin) < n && !pausadoEm(absTs(t, e.inicioMin)))
     .reduce((s, e) => s + e.litros * Math.min(1, (n - absTs(t, e.inicioMin)) / (e.minutos * 60000)), 0);
@@ -356,7 +411,9 @@ function acionarOverrideRega({ zonasIdx = [0, 1], minutosPorZona = null, litrosP
     };
   }
 
-  S.tank.level_L = Math.max(0, (S.tank.level_L ?? S.tank.capacity) - addLitros);
+  if (!S.device?.lastSeen) {
+    S.tank.level_L = Math.max(0, (S.tank.level_L ?? S.tank.capacity) - addLitros);
+  }
   const descZonas = novosEventos.map((e) => `Zona ${e.zona}: ${fmtMin(e.minutos)} (${fmtL(e.litros)})`).join(' + ');
   const msgAudit = rotulo
     ? `${rotulo}: ${descZonas}`
@@ -402,7 +459,9 @@ function regarAgora(extraMm = 0, zonasSel, origem = 'app') {
 function cancelarRegaManual(ev) {
   if (ev) ev.stopPropagation();
   if (S.manual) {
-    S.tank.level_L = Math.min(S.tank.capacity, (S.tank.level_L || 0) + (S.manual.litrosTotal || 0));
+    if (!S.device?.lastSeen) {
+      S.tank.level_L = Math.min(S.tank.capacity, (S.tank.level_L || 0) + (S.manual.litrosTotal || 0));
+    }
     S.manual = null;
   }
   S.auditoria = S.auditoria.filter((a) => a.tipo !== 'regar_agora');
@@ -1115,11 +1174,17 @@ function renderCabecalho() {
 }
 
 function renderHero(P, agora, proxima, semana, usado, espias) {
+  const espOnline = !!(S.device?.online && (Date.now() - (S.device?.lastSeen || 0) < 35000));
+  const temManualPendente = S.manual && Array.isArray(S.manual.eventos) && S.manual.eventos.length > 0;
   let dotCor = 'var(--green)', titulo, subtitulo;
   if (S.filtro.pct < 50) {
     dotCor = 'var(--red)';
     titulo = '🛑 Rega parada: limpar filtro';
     subtitulo = 'Lave os discos do filtro 120 Mesh para retomar.';
+  } else if (!espOnline && temManualPendente) {
+    dotCor = 'var(--amber)';
+    titulo = '📡 Fila aguardando conexão do ESP32';
+    subtitulo = `${fmtL(S.manual.litrosTotal)} enfileirados. Válvulas abrirão e cota será consumida assim que a placa ligar.`;
   } else if (agora) {
     dotCor = 'var(--blue)';
     const z = S.zones.find((x) => x.id === agora.zona);

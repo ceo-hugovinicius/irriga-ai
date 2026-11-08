@@ -1,5 +1,5 @@
 // ==============================================================================
-// 🌱 Irriga.ai Pro-Duo · v1.5.2-Argon — Firmware Autônomo ESP32
+// 🌱 Irriga.ai Pro-Duo · v1.6.5-Argon — Firmware Autônomo ESP32
 // ------------------------------------------------------------------------------
 // Espelha o motor único `core/irriga-core.js` em C++:
 //  1. Rega Diária Garantida em 2 turnos (Manhã Cedo 04:00–05:30 + Fim da Tarde
@@ -244,6 +244,38 @@ void abrirZonaFila(uint8_t idx, float litrosAlvo) {
     burstStartMs       = 0;
 }
 
+// Despacha a próxima zona da fila se o sistema estiver livre e despausado
+void despacharFilaSeOcioso() {
+    if (isPaused || hydraulicLockAlert || activeZoneIdx >= 0) return;
+    if (queueLiters[0] >= 2.0f) {
+        float l = queueLiters[0];
+        queueLiters[0] = 0.0f;
+        abrirZonaFila(0, l);
+    } else if (queueLiters[1] >= 2.0f) {
+        float l = queueLiters[1];
+        queueLiters[1] = 0.0f;
+        abrirZonaFila(1, l);
+    }
+}
+
+// Pausa o sistema de forma segura, preservando litros restantes na fila para retomada
+void pausarSistema(uint32_t horas) {
+    uint32_t now = millis();
+    isPaused = true;
+    pauseIndefinite = (horas == 0);
+    pauseUntilMs = horas > 0 ? (now + horas * 3600UL * 1000UL) : 0;
+
+    // Se havia uma zona ativamente irrigando, preserva os litros restantes na fila
+    if (activeZoneIdx >= 0 && activeZoneIdx <= 1) {
+        float entregue = zones[activeZoneIdx].delivered_today_L - activeStartLiters;
+        float restante = max(0.0f, activeTargetLiters - entregue);
+        if (restante >= 1.5f) {
+            queueLiters[activeZoneIdx] += restante;
+        }
+    }
+    fecharTodasValvulas();
+}
+
 // Override Manual "+1 Hora Flex" (Botão físico B2):
 // Cada aperto adiciona +30 min na Zona 1 e +30 min na Zona 2 (mesmo acima da cota diária!)
 void enfileirarOverrideFlex1Hora() {
@@ -259,13 +291,7 @@ void enfileirarOverrideFlex1Hora() {
     }
     isPaused = false;
     pauseIndefinite = false;
-    if (activeZoneIdx < 0 && queueLiters[0] >= 2.0f) {
-        float l = queueLiters[0]; queueLiters[0] = 0;
-        abrirZonaFila(0, l);
-    } else if (activeZoneIdx < 0 && queueLiters[1] >= 2.0f) {
-        float l = queueLiters[1]; queueLiters[1] = 0;
-        abrirZonaFila(1, l);
-    }
+    despacharFilaSeOcioso();
 }
 
 // --- Leitura dos 4 Botões Físicos ---
@@ -304,9 +330,7 @@ void processarBotoesFisicos() {
         } else if (lvl == LOW && !btns[i].longHandled && !btns[i].wasSleeping) {
             // B1 segurado por 3s = Pausa sem prazo (somente com a tela já acesa)
             if (i == 0 && (now - btns[i].downMs >= 3000)) {
-                isPaused = true;
-                pauseIndefinite = true;
-                fecharTodasValvulas();
+                pausarSistema(0);
                 btns[i].longHandled = true;
                 beep(200, 2);
             }
@@ -321,10 +345,9 @@ void processarBotoesFisicos() {
                 if (i == 0) { // B1: Pausa 2h c/ retomada auto ou Retoma
                     if (isPaused) {
                         isPaused = false; pauseIndefinite = false;
+                        despacharFilaSeOcioso();
                     } else {
-                        isPaused = true; pauseIndefinite = false;
-                        pauseUntilMs = now + 2UL * 3600UL * 1000UL;
-                        fecharTodasValvulas();
+                        pausarSistema(2);
                     }
                 } else if (i == 1) { // B2: Override +1 Hora Flex (30 min Z1 + 30 min Z2)
                     enfileirarOverrideFlex1Hora();
@@ -412,22 +435,18 @@ void atualizarSensorVazaoETravas() {
 
         // Verifica se entregou o pulso alvo e avança a fila anti-colisão
         if ((z.delivered_today_L - activeStartLiters) >= activeTargetLiters) {
-            uint8_t finishedIdx = activeZoneIdx;
             fecharTodasValvulas();
-            uint8_t nextIdx = 1 - finishedIdx;
-            if (queueLiters[nextIdx] >= 2.0f) {
-                float l = queueLiters[nextIdx];
-                queueLiters[nextIdx] = 0.0f;
-                abrirZonaFila(nextIdx, l);
-            }
+            despacharFilaSeOcioso();
         }
     } else {
         currentFlowLpm = 0.0f;
+        despacharFilaSeOcioso();
     }
 
     // Retomada automática da pausa temporária
     if (isPaused && !pauseIndefinite && now >= pauseUntilMs) {
         isPaused = false;
+        despacharFilaSeOcioso();
     }
 }
 
@@ -442,7 +461,7 @@ void desenharOled() {
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
-    display.println(F("IRRIGA.AI v1.5-ARGON"));
+    display.println(F("IRRIGA.AI v1.6.5"));
     display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
 
     display.setCursor(0, 14);
@@ -465,6 +484,8 @@ void desenharOled() {
 
 void fecharTodasValvulas();
 void abrirZonaFila(uint8_t idx, float litrosAlvo);
+void despacharFilaSeOcioso();
+void pausarSistema(uint32_t horas);
 void recalcularPlanoDoDia();
 void publicarStatusMqtt();
 
@@ -472,16 +493,20 @@ void executarComandoGeral(JsonDocument& doc) {
     String acao = doc["acao"] | "";
     if (acao == "pausar") {
         uint32_t h = doc["horas"] | 0;
-        isPaused = true;
-        pauseIndefinite = (h == 0);
-        pauseUntilMs = millis() + h * 3600UL * 1000UL;
-        fecharTodasValvulas();
+        pausarSistema(h);
         beep(80, 2);
     } else if (acao == "retomar") {
         isPaused = false;
         pauseIndefinite = false;
         hydraulicLockAlert = false;
+        despacharFilaSeOcioso();
         beep(80, 1);
+    } else if (acao == "inverter_fila") {
+        float tmp = queueLiters[0];
+        queueLiters[0] = queueLiters[1];
+        queueLiters[1] = tmp;
+        despacharFilaSeOcioso();
+        beep(60, 2);
     } else if (acao == "regar_agora" || acao == "override_regar_agora") {
         if (doc["zonas"].is<JsonArray>()) {
             JsonArray zs = doc["zonas"].as<JsonArray>();
@@ -567,7 +592,7 @@ void configurarRotasHttp() {
 
     server.on("/api/status", HTTP_GET, []() {
         JsonDocument doc;
-        doc["v"]          = "1.6-argon";
+        doc["v"]          = "1.6.5-argon";
         doc["tank_L"]     = lerCaixaLitros();
         doc["filter_pct"] = filter_health_pct;
         doc["flow_lpm"]   = currentFlowLpm;
@@ -631,7 +656,7 @@ void configurarRotasHttp() {
 void publicarStatusMqtt() {
     if (!mqttClient.connected()) return;
     JsonDocument doc;
-    doc["v"]          = "1.6-argon";
+    doc["v"]          = "1.6.5-argon";
     doc["tank_L"]     = lerCaixaLitros();
     doc["filter_pct"] = filter_health_pct;
     doc["flow_lpm"]   = currentFlowLpm;

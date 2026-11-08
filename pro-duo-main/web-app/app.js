@@ -27,7 +27,7 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); defe
 
 function novoEstado() {
   const base = C.estadoPadrao();
-  base.versao = '1.6.0-argon';
+  base.versao = '1.6.5-argon';
   base.zones[0].crop = null;
   base.zones[1].crop = null;
   return Object.assign(base, {
@@ -62,7 +62,7 @@ function carregar() {
     const raw = localStorage.getItem(KEY) || localStorage.getItem('irriga_argon_v1_6') || localStorage.getItem('irriga_argon_v1_5');
     if (raw) {
       const st = Object.assign(novoEstado(), JSON.parse(raw));
-      st.versao = '1.6.0-argon';
+      st.versao = '1.6.5-argon';
       st.zones = (st.zones || []).map((z, i) => migrarZona(z, i));
       if (!st.windows || !st.windows.dawn_start) {
         st.windows = { dawn_start: '04:00', end_dawn: '05:30', evening: '16:00', evening_hot: '16:30', pulse_max_min: 90, gap_min: 5 };
@@ -272,7 +272,10 @@ function pausar(horas, origem = 'app') {
   const aberta = S.pauseLog.find((p) => p.ate === null || p.ate > Date.now());
   if (aberta) aberta.ate = ate; else S.pauseLog.push({ de: Date.now(), ate });
   S.pause = { until: ate ? new Date(ate).toISOString() : null, indefinite: !horas, origem };
-  if (S.manual) S.manual.fim = Date.now();
+  if (S.manual && S.manual.fim > Date.now()) {
+    S.manual.restanteMs = S.manual.fim - Date.now();
+    S.manual.pausado = true;
+  }
   audit(origem, horas ? `⏸️ Pausou regas por ${horas} h` : '⏸️ Pausou regas sem prazo', 'pausa', { horas });
   enviarComando({ acao: 'pausar', horas: horas || 0 });
   salvarConfigCloud();
@@ -284,6 +287,11 @@ function pausar(horas, origem = 'app') {
 function retomar(origem = 'app', silencioso) {
   S.pauseLog.forEach((p) => { if (p.ate === null || p.ate > Date.now()) p.ate = Date.now(); });
   S.pause = { until: null, indefinite: false, origem: null };
+  if (S.manual && S.manual.pausado && S.manual.restanteMs > 0) {
+    S.manual.fim = Date.now() + S.manual.restanteMs;
+    delete S.manual.restanteMs;
+    delete S.manual.pausado;
+  }
   if (!silencioso) audit(origem, '▶️ Retomou o piloto automático', 'retomar');
   enviarComando({ acao: 'retomar' });
   salvarConfigCloud();
@@ -424,6 +432,18 @@ function removerDaFila(zonaId) {
   sincronizarEsp32();
   salvarLocal(); render();
   toast(`✕ Zona ${zonaId} removida da fila de rega!`);
+}
+
+function inverterFila() {
+  if (S.ui.locked) {
+    solicitarDestravamentoComPin(() => inverterFila());
+    return;
+  }
+  enviarComando({ acao: 'inverter_fila' });
+  salvarConfigCloud();
+  sincronizarEsp32();
+  salvarLocal(); render();
+  toast('⇅ Ordem da fila de irrigação invertida com sucesso!');
 }
 
 function cancelarBoost(ev) {
@@ -830,17 +850,24 @@ function renderFilaIrrigacao(agora, ev) {
   const queueZ2 = (telemetry && typeof telemetry.queue_z2_L === 'number') ? telemetry.queue_z2_L : 0;
 
   const itens = [];
+  const emPausa = pausado();
+  const nivelCaixa = S.tank.level_L ?? 3750;
+  const capCaixa = S.tank.capacity || 5000;
+  const resPct = S.tank.reserve_pct || 25;
+  const caixaBaixa = nivelCaixa < (capCaixa * (resPct / 100));
 
   // 1. Zona ativa no momento
   if (activeZoneId > 0) {
     const zObj = S.zones.find((z) => z.id === activeZoneId);
     const nomeZ = zObj ? zObj.nome.split('—')[0].trim() : `Zona ${activeZoneId}`;
     const cropNome = zObj?.crop && C.CROPS[zObj.crop.id] ? `${C.CROPS[zObj.crop.id].emoji} ${C.CROPS[zObj.crop.id].nome}` : '🟫 Canteiro livre';
+    const vazao = zObj ? (C.vazaoZona(zObj, S.soil) || 3.0) : 3.0;
+    const minRest = Math.max(1, Math.round(activeRemL / vazao));
     itens.push({
       tipo: 'ativa',
       zona: activeZoneId,
       titulo: `${nomeZ} · ${cropNome}`,
-      sub: `Em irrigação agora · Restam ~${fmtL(activeRemL)}`,
+      sub: `Em irrigação agora · Restam ~${fmtL(activeRemL)} (~${fmtMin(minRest)})`,
       badge: '💧 Regando',
       badgeClass: 'blue',
       acaoBtn: '✕ Parar',
@@ -854,23 +881,50 @@ function renderFilaIrrigacao(agora, ev) {
     { id: 1, litros: Math.round(queueZ1) },
     { id: 2, litros: Math.round(queueZ2) },
   ];
-  filaEsp.forEach((f) => {
-    if (f.litros >= 2 && f.id !== activeZoneId) {
-      const zObj = S.zones.find((z) => z.id === f.id);
-      const nomeZ = zObj ? zObj.nome.split('—')[0].trim() : `Zona ${f.id}`;
-      const cropNome = zObj?.crop && C.CROPS[zObj.crop.id] ? `${C.CROPS[zObj.crop.id].emoji} ${C.CROPS[zObj.crop.id].nome}` : '🟫 Canteiro';
-      itens.push({
-        tipo: 'fila',
-        zona: f.id,
-        titulo: `${nomeZ} · ${cropNome}`,
-        sub: `Na fila (aguardando vez) · Volume: ${fmtL(f.litros)}`,
-        badge: '⏳ Na Fila',
-        badgeClass: 'amber',
-        acaoBtn: '✕ Cancelar',
-        btnClass: '',
-        onclick: `removerDaFila(${f.id})`,
-      });
+  const itensNaEspera = filaEsp.filter((f) => f.litros >= 2 && f.id !== activeZoneId);
+
+  itensNaEspera.forEach((f) => {
+    const zObj = S.zones.find((z) => z.id === f.id);
+    const nomeZ = zObj ? zObj.nome.split('—')[0].trim() : `Zona ${f.id}`;
+    const cropNome = zObj?.crop && C.CROPS[zObj.crop.id] ? `${C.CROPS[zObj.crop.id].emoji} ${C.CROPS[zObj.crop.id].nome}` : '🟫 Canteiro';
+
+    let subTexto = '';
+    let badgeTexto = '⏳ Na Fila';
+    let badgeCls = 'amber';
+
+    if (emPausa) {
+      badgeTexto = '⏸️ Pausado';
+      badgeCls = 'amber';
+      subTexto = `Pausado pelo agricultor · Toque em "Retomar" no topo para liberar os ${fmtL(f.litros)}`;
+    } else if (activeZoneId > 0) {
+      const zAtiva = S.zones.find((z) => z.id === activeZoneId);
+      const nomeZAtiva = zAtiva ? zAtiva.nome.split('—')[0].trim() : `Zona ${activeZoneId}`;
+      const vazaoAtiva = zAtiva ? (C.vazaoZona(zAtiva, S.soil) || 3.0) : 3.0;
+      const minRest = Math.max(1, Math.round(activeRemL / vazaoAtiva));
+      badgeTexto = '⏳ Anti-Colisão';
+      badgeCls = 'amber';
+      subTexto = `Aguardando ${nomeZAtiva} concluir (~${fmtMin(minRest)} rest.) · Anti-colisão no filtro 120M · Volume: ${fmtL(f.litros)}`;
+    } else if (caixaBaixa) {
+      badgeTexto = '🪣 Caixa Baixa';
+      badgeCls = 'amber';
+      subTexto = `Caixa d'água (${fmtL(nivelCaixa)}) abaixo da reserva de ${resPct}% (${fmtL(capCaixa * resPct / 100)}) · Aguardando poço`;
+    } else {
+      badgeTexto = '🚀 Despachando';
+      badgeCls = 'blue';
+      subTexto = `Válvula liberada · Iniciando gotejamento de ${fmtL(f.litros)} em instantes...`;
     }
+
+    itens.push({
+      tipo: 'fila',
+      zona: f.id,
+      titulo: `${nomeZ} · ${cropNome}`,
+      sub: subTexto,
+      badge: badgeTexto,
+      badgeClass: badgeCls,
+      acaoBtn: '✕ Cancelar',
+      btnClass: '',
+      onclick: `removerDaFila(${f.id})`,
+    });
   });
 
   // 3. Se não houver nada irrigando nem na fila do override, mostra os próximos turnos automáticos
@@ -883,7 +937,7 @@ function renderFilaIrrigacao(agora, ev) {
       itens.push({
         tipo: 'turno',
         titulo: `🌅 Turno da Manhã Cedo (${S.windows?.dawn_start || '04:00'})`,
-        sub: 'Programado pelo Piloto Automático',
+        sub: 'Agendado pelo Piloto Automático · Menor evaporação e temperatura amena',
         badge: 'Agendado',
         badgeClass: 'green',
       });
@@ -892,24 +946,46 @@ function renderFilaIrrigacao(agora, ev) {
       itens.push({
         tipo: 'turno',
         titulo: `🌇 Turno do Fim de Tarde (${S.windows?.evening || '16:00'})`,
-        sub: 'Programado pelo Piloto Automático',
+        sub: 'Agendado pelo Piloto Automático · Permite recarga da caixa de 5.000 L pelo poço artesiano',
         badge: 'Agendado',
         badgeClass: 'green',
       });
     }
   }
 
+  const temFila = itensNaEspera.length > 0;
+  let borderCor = 'var(--green)';
+  let headerPill = '<span class="pill green">Pronto</span>';
+  let headerSub = 'Piloto automático em prontidão';
+
+  if (activeZoneId > 0) {
+    borderCor = 'var(--blue)';
+    headerPill = '<span class="pill blue"><span class="live"></span>Irrigando</span>';
+    headerSub = 'Válvula mestra aberta · Anti-colisão ativa (filtro 120M)';
+  } else if (emPausa) {
+    borderCor = 'var(--amber)';
+    headerPill = '<span class="pill amber">⏸️ Em Pausa</span>';
+    headerSub = temFila ? 'Fila retida · Sistema em pausa temporária' : 'Piloto automático pausado temporariamente';
+  } else if (temFila) {
+    borderCor = 'var(--blue)';
+    headerPill = '<span class="pill blue"><span class="live"></span>Fila Ativa</span>';
+    headerSub = 'Despachando próxima zona da fila anti-colisão';
+  }
+
   return `
-    <section class="card" style="margin-bottom:16px;border-left:4px solid ${activeZoneId > 0 ? 'var(--blue)' : 'var(--green)'}">
+    <section class="card" style="margin-bottom:16px;border-left:4px solid ${borderCor}">
       <div class="row between" style="margin-bottom:10px">
         <div class="row" style="gap:8px;align-items:center">
           <span style="font-size:18px">📋</span>
           <div>
             <div class="t14 b">Fila de Irrigação</div>
-            <div class="t12 mute">${activeZoneId > 0 ? 'Válvula mestra aberta · Irrigando em sequência' : 'Piloto automático em prontidão'}</div>
+            <div class="t12 mute">${esc(headerSub)}</div>
           </div>
         </div>
-        ${activeZoneId > 0 ? '<span class="pill blue"><span class="live"></span>Irrigando</span>' : '<span class="pill green">Pronto</span>'}
+        <div class="row" style="gap:6px;align-items:center">
+          ${itensNaEspera.length >= 2 ? '<button class="btn sm" style="padding:4px 8px;font-size:11px" onclick="inverterFila()" title="Inverte a ordem das zonas na fila">⇅ Inverter Ordem</button>' : ''}
+          ${headerPill}
+        </div>
       </div>
 
       <div style="display:grid;gap:8px">
@@ -961,7 +1037,7 @@ function render() {
       ${renderEventosRegistrados()}
     </section>
     <p class="mute t12" style="text-align:center;margin-top:4px">
-      Irriga.ai Pro-Duo · <b>v1.6.0-Argon</b> · <a href="./dev-gui.html" style="color:var(--blue);font-weight:750;text-decoration:none">🛠️ Bancada de Testes (Dev-GUI)</a>
+      Irriga.ai Pro-Duo · <b>v1.6.5-Argon</b> · <a href="./dev-gui.html" style="color:var(--blue);font-weight:750;text-decoration:none">🛠️ Bancada de Testes (Dev-GUI)</a>
     </p>
   `;
 }
@@ -973,7 +1049,7 @@ function renderCabecalho() {
       <div>
         <div class="brand-title">
           <span>Irriga.ai</span>
-          <span class="pill green" style="font-size:11px;padding:2px 8px">1.6.0-Argon</span>
+          <span class="pill green" style="font-size:11px;padding:2px 8px">1.6.5-Argon</span>
         </div>
         <div class="brand-sub">📍 ${esc(S.site.nome)}</div>
       </div>

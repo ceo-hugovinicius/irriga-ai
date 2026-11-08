@@ -1,40 +1,54 @@
-# 🌱 Irriga.ai Pro-Duo · `v1.5.2-Argon` (Simplicidade de Uso sem Perda de Funcionalidade)
+# 🌱 Irriga.ai Pro-Duo · `v1.6.7.a (SABIÁ)`
 
-Esta evolução **`v1.5.2-Argon`** mantém toda a inteligência agronômica e hidráulica nos bastidores (`core/irriga-core.js`), eliminando chutômetros e jargões técnicos para entregar controle real, simples e humano no dia a dia do sítio.
+> **SABIÁ:** Sistema Autônomo de Balanço hídrico e Irrigação Assistida  
+> **Hardware de Campo:** Microcontrolador autônomo (ESP32-WROOM-32D / Bancada Wokwi)  
+> **Localização:** Sítio em São Vicente do Seridó – PB  
+
+O ecossistema **Irriga.ai Pro-Duo (v1.6.7.a)** é a solução definitiva de automação agronômica para o Semiárido. Toda a inteligência agronômica de balanço hídrico FAO-56 opera unificada em 2 turnos diários no motor autônomo **SABIÁ**, com sincronização em tempo real multi-telas via nuvem MQTT (HiveMQ) e WebApp PWA Offline-First.
 
 ---
 
-## ✨ O Que Mudou na `v1.5.2-Argon`
+## 🦅 Identidade SABIÁ
 
-1. **🚫 Fim do "Chutômetro" de Umidade + Rega Diária Garantida + Decisão Inteligente para Frutos com Restrição Hídrica:**
-   - Removemos a barra de `% de umidade do solo` estimada sem sensor físico (que podia deixar a planta com sede achando que a terra estava molhada).
-   - Agora o sistema trabalha com **Rega Diária Garantida** dentro da cota diária.
-   - **Mecanismo de Tomada de Decisão na Reta Final (`🍯 Melancia, Melão, Jerimum e Batata-doce`):**
-     - Nos dias finais de maturação/cura, o sistema aplica redução controlada (`-50%` a `-65%`) para concentrar o açúcar (**°Brix**) e evitar rachaduras.
-     - Se detectar **clima ameno (`< 30,5 °C`), chance de chuva (`>= 50%`) ou chuva anotada**, entra automaticamente em **Corte Forte (`-70%` a `-80%`, mantendo apenas um pulso leve de manhã e cortando o turno da tarde)**. O agricultor também pode alternar com 1 toque no cartão da zona entre `🤖 Auto`, `🍯 Reduzir`, `☀️ Corte Forte` ou `🛑 Secar Hoje (0 L)`.
+O microcontrolador de campo deixa de ser tratado como mero componente de bancada e passa a ser reconhecido na interface e em campo como **SABIÁ** (*Sistema Autônomo de Balanço hídrico e Irrigação Assistida*):
 
-2. **🌅🌇 Divisão da Rega em 2 Turnos Diários (Manhã Cedo + Fim da Tarde):**
-   - Em vez de concentrar regas à meia-noite, o uso diário de água é dividido em **2 turnos**:
-     - **🌅 Manhã Cedo (`04:00–05:30`):** ~60% da água do dia para a planta atravessar o sol quente hidratada.
-     - **🌇 Fim da Tarde (`16:00–17:30`):** ~40% da água no entardecer, facilitando para o **poço artesiano repor a água da caixa de 5.000 L** ao longo do dia.
+- **Pílula Interativa no Cabeçalho:** `SABIÁ Online` (verde) ou `SABIÁ Offline` (âmbar). Ao clicar, abre o modal educativo que detalha o que é o servidor autônomo SABIÁ, o que ele faz pelo agricultor e o diagnóstico com telemetria em tempo real.
+- **Display OLED 128x64:** Exibe `IRRIGA.AI v1.6.7.a` e logs seriais identificados como `[SABIÁ]`.
+- **Telemetria e LWT:** Avisos no broker HiveMQ identificando `SABIÁ OFFLINE` e `v: "1.6.7.a"`.
+- **Fila e Overrides Inteligentes:** Mensagens claras na interface informando quando a fila está aguardando o SABIÁ conectar para liberar a água.
 
-3. **🚰 Contador "Pedido Real das Plantas vs. Gasto na Cota" (Indicador de Sede):**
-   - No painel **Água do Dia**, além da cota e do nível da caixa de 5.000 L, há o contador **`🌱 Pedido real hoje`** comparado com **`🚰 Gasto / Cota`**.
-   - Se a cota diária estiver travando o que as plantas realmente pedem, o painel alerta na hora: **`⚠️ Passando sede: faltam X L (−Y%)`**.
+---
 
-4. **📏 Hidráulica Medida por Metros de Fita de Gotejamento (Sem Contar "Fileiras"):**
-   - Em **⚙️ Fita e Ajustes** de cada zona, você informa:
-     - **Metragem total da fita de gotejamento (`metros`)**
-     - **Espaçamento entre gotejadores (`20 cm`, `30 cm`, `40 cm`, `50 cm`)**
-     - **Vazão por hora de cada gotejador (`L/h por furo`)**
-   - O sistema calcula automaticamente o total de furos e o **volume exato de saída da zona (`L/hora` e `L/min`)**.
+## ✨ Principais Funcionalidades da v1.6.7.a
 
-5. **💧 Novo "Regar Agora" como Override ("Little Treat / Flex") + Conversor Bidirecional `Horas ⇄ Litros`:**
-   - **No Botão Físico B2 (`GPIO 14`) ou atalho `+1h Flex`:** cada aperto adiciona **+1 hora de água (30 min na Zona 1 + 30 min na Zona 2)**. Ele é contabilizado no dia, mas **consegue derramar água mesmo quando a cota diária já foi atingida**.
-   - **No Painel Web/PC:** permite escolher **As 2 zonas**, **Só Zona 1** ou **Só Zona 2**, e digitar/selecionar por **Tempo (Horas)** ou por **Volume (Litros)** com conversão instantânea:
-     - Colocou **2 horas** → mostra na hora: **`Vai gastar XYZ Litros`**.
-     - Colocou **1.500 Litros** → mostra na hora: **`Vai durar Z horas e W min`**.
+1. **🔄 Sincronização em Tempo Real Multi-Dispositivos:**
+   - Celular, computador e tablet refletem alterações de configuração (reforço climático, palhada, cota, solo, overrides) instantaneamente via MQTT sem necessidade de recarregar a página.
 
-6. **📖 Guia de Culturas & Espaçamentos Separado de 🔄 Confirmar Troca de Cultura:**
-   - **`📖 Ver culturas e espaçamentos`:** modo de consulta 100% seguro (não apaga a safra atual!) mostrando **espaçamento mínimo da rua (entre fitas)**, **espaçamento entre plantas**, ciclo e preparo de todas as 10 culturas.
-   - **`🔄 Trocar cultura`:** exige destravar o cadeado e clicar no passo explícito **`✅ Sim, Confirmar Troca de Cultura`**, protegendo a safra em andamento contra cliques acidentais.
+2. **🔒 Segurança & Blindagem de PIN Anti-Griefing:**
+   - Proteção estrita do modal de Ajustes quando o painel estiver bloqueado.
+   - Máscara visual de senha com alternância de visibilidade (`👁️`).
+   - Proteção contra ataques de força bruta: bloqueio temporal de 1 minuto após 3 erros consecutivos e 5 minutos após 5 erros, persistido em `localStorage`.
+   - Higienização de dados: o PIN nunca trafega no broker MQTT público.
+
+3. **🌾 Alerta de Choque de Cota no Plantio:**
+   - Detecta no ato da troca de cultura se a demanda da nova planta somada às outras zonas ativas ultrapassará a cota diária do sítio.
+   - Botão direto `[📅 Usar Data Recomendada]` para agendar a semeadura/transplante em data segura com 1 clique.
+
+4. **⏱️ Telemetria Hardware-First:**
+   - A contagem regressiva e os volumes restantes exibidos na interface derivam diretamente do fluxo medido pelo sensor do SABIÁ (`active_rem_L`).
+   - Alerta em tempo real de `⚠️ Fluxo Interrompido / Tubulação Seca` se a válvula estiver aberta sem fluxo detectado.
+
+5. **🌅🌇 2 Turnos Diários (04h e 16h):**
+   - Rega focada nos horários mais frescos do dia para maximizar o aproveitamento hídrico e facilitar a reposição da caixa d'água de 5.000 L pelo poço artesiano.
+
+6. **💧 Override Manual +1h Flex:**
+   - Botão físico B2 ou comando pelo app permite acionar 1 hora de rega flexível (30 min Z1 + 30 min Z2) com conversão direta `Horas ⇄ Litros`.
+
+---
+
+## 🚀 Como Executar
+
+- **Web-App PWA:** Abra [`web-app/index.html`](./web-app/index.html) no navegador ou acesse o site público.
+- **Bancada de Engenharia (Dev-GUI):** Abra [`web-app/dev-gui.html`](./web-app/dev-gui.html).
+- **Simulador de Safra de 260 Dias:** `node sim/simular_safra.js`.
+- **Firmware do SABIÁ:** [`firmware/src/main.cpp`](./firmware/src/main.cpp).

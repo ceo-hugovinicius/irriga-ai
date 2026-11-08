@@ -1,7 +1,7 @@
 /* ============================================================================
  * Irriga.ai Pro-Duo · v1.6.7.a (SABIÁ) — Service Worker Offline-First (PWA)
  * ========================================================================== */
-const CACHE_NAME = 'irriga-pro-duo-v1.6.7a';
+const CACHE_NAME = 'irriga-pro-duo-v1.6.7a-hotfix';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -39,6 +39,7 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
+  // 1. APIs dinâmicas (clima Open-Meteo e REST local): tenta rede primeiro com cache de contingência
   if (url.hostname.includes('open-meteo.com') || url.pathname.includes('/api/')) {
     event.respondWith(
       fetch(req).then((res) => {
@@ -50,16 +51,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // 2. Arquivos da aplicação: Network-First garantindo sempre a versão mais nova no ar
+  // Se estiver sem internet no sítio, recorre instantaneamente ao cache local
   event.respondWith(
-    caches.match(req).then((cached) => {
-      const net = fetch(req).then((res) => {
+    fetch(req)
+      .then((res) => {
         if (res && res.status === 200) {
           const copy = res.clone();
           caches.open(CACHE_NAME).then((c) => c.put(req, copy));
         }
         return res;
-      }).catch(() => cached);
-      return cached || net;
-    })
+      })
+      .catch(() => caches.match(req))
   );
 });

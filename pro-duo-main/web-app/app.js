@@ -1712,7 +1712,18 @@ window.addEventListener('focus', acordarApp);
 async function iniciar() {
   fecharDiasPendentes(); render();
   iniciarMqttNuvem(); // Inicia a conexão MQTT em tempo real via nuvem HiveMQ
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      reg.update();
+    }).catch(() => {});
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
+  }
   if (!S.weather.fetched || Date.now() - S.weather.fetched > 3 * 3600e3) { await buscarClima(); fecharDiasPendentes(); render(); }
   await sincronizarEsp32(); render();
   setInterval(() => { fecharDiasPendentes(); render(); }, 30000);

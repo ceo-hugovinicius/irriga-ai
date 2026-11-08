@@ -20,6 +20,8 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <PubSubClient.h>
 #include <WebServer.h>
 #include <Preferences.h>
@@ -30,6 +32,8 @@
 #include "pinout_pro_duo.h"
 
 using namespace IrrigaPins;
+
+Preferences prefs;
 
 // --- Constantes Físicas e Hidráulicas ---
 constexpr float EFICIENCIA_GOTEJO      = 0.88f;
@@ -105,6 +109,35 @@ String lastAlertMsg      = "OK";
 
 void IRAM_ATTR onSf1Pulse() {
     sf1Pulses++;
+}
+
+// --- Alertas Telegram Nativos Direto pelo ESP32 (Zero Servidores / Sem PC Ligado) ---
+String tgToken = "";
+String tgChatId = "";
+uint32_t lastTgAlertMs = 0;
+
+void enviarTelegramEmergencia(const String& motivo) {
+    if (tgToken.length() < 10 || tgChatId.length() < 3 || WiFi.status() != WL_CONNECTED) return;
+    uint32_t now = millis();
+    if (now - lastTgAlertMs < 900000UL) return; // Trava contra flood: 1 alerta a cada 15 min
+    lastTgAlertMs = now;
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient https;
+    String url = "https://api.telegram.org/bot" + tgToken + "/sendMessage";
+    if (https.begin(client, url)) {
+        https.addHeader("Content-Type", "application/json");
+        StaticJsonDocument<512> doc;
+        doc["chat_id"] = tgChatId;
+        doc["text"] = "🚨 *ALERTA URGENTE DO SABIÁ (ESP32)* 🚨\n" + motivo + "\n\n🛡️ *O microcontrolador desligou o sistema imediatamente para proteger a bomba.*";
+        doc["parse_mode"] = "Markdown";
+        String payload;
+        serializeJson(doc, payload);
+        https.POST(payload);
+        https.end();
+        Serial.println("✈️ [SABIÁ] Alerta despachado diretamente ao Telegram pelo ESP32!");
+    }
 }
 
 // --- Display OLED, Servidor HTTP e Nuvem MQTT (HiveMQ) ---
@@ -431,6 +464,7 @@ void atualizarSensorVazaoETravas() {
                 lastAlertMsg = "TRAVA: CANO SECO";
                 fecharTodasValvulas();
                 beep(300, 3);
+                enviarTelegramEmergencia("⚠️ *Cano Seco / Bomba Parada:* A válvula abriu mas o sensor registrou 0 L/min na tubulação.");
             }
         } else dryPipeStartMs = 0;
 
@@ -442,6 +476,7 @@ void atualizarSensorVazaoETravas() {
                 lastAlertMsg = "TRAVA: VAZAMENTO";
                 fecharTodasValvulas();
                 beep(300, 4);
+                enviarTelegramEmergencia("⚠️ *Possível Rompimento / Vazamento:* Vazão anormal (> 15 L/min) registrada no sensor.");
             }
         } else burstStartMs = 0;
 
@@ -509,10 +544,20 @@ void recalcularPlanoDoDia();
 void publicarStatusMqtt();
 
 void executarComandoGeral(JsonDocument& doc) {
+    if (doc["tg_token"].is<const char*>() && doc["tg_chat"].is<const char*>()) {
+        tgToken = doc["tg_token"].as<String>();
+        tgChatId = doc["tg_chat"].as<String>();
+        prefs.putString("tg_token", tgToken);
+        prefs.putString("tg_chat", tgChatId);
+        Serial.println("✈️ [SABIÁ] Credenciais do Telegram salvas no ESP32!");
+    }
+
     String acao = doc["acao"] | "";
     if (acao == "ping" || acao == "status" || acao == "obter_status") {
         publicarStatusMqtt();
         return;
+    } else if (acao == "teste_telegram") {
+        enviarTelegramEmergencia("🔔 *Teste Operacional:* Disparo de teste vindo diretamente do microcontrolador ESP32.");
     } else if (acao == "pausar") {
         uint32_t h = doc["horas"] | 0;
         pausarSistema(h);
@@ -814,6 +859,14 @@ void setup() {
 #endif
 
     Serial.println("🌱 [SABIÁ] Sistema v1.6.7.a iniciado com sucesso!");
+
+    // 6. Memória Flash Não-Volátil (Preferences)
+    prefs.begin("sabia", false);
+    tgToken = prefs.getString("tg_token", "");
+    tgChatId = prefs.getString("tg_chat", "");
+    if (tgToken.length() > 5) {
+        Serial.println("✈️ [SABIÁ] Notificações Telegram configuradas no microcontrolador.");
+    }
 
     Serial.println("⚙️ [1/3] Calculando plano hídrico do dia...");
     recalcularPlanoDoDia();

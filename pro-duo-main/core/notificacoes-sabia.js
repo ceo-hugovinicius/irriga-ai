@@ -1,5 +1,5 @@
 /* ============================================================================
- * 🌱 SABIÁ · Notificações & Boletins Agronômicos Autônomos (WhatsApp do Grupo)
+ * 🌱 SABIÁ · Notificações & Boletins Agronômicos Autônomos (Telegram do Grupo)
  * ============================================================================
  * Gera exclusivamente mensagens operacionais agronômicas para o grupo da família:
  *  1. ☀️ Boletim da Manhã (06:00): Status do cultivo, previsão, fases e Pro Tips de manejo.

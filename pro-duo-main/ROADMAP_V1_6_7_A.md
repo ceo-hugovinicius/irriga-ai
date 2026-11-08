@@ -80,9 +80,13 @@
 
 ---
 
-## 📲 Task 5: Robô Autônomo de Mensagens para Grupo da Família no WhatsApp (`core/notificacoes-sabia.js` & `bot/`)
+## ✈️ Task 5: Robô Oficial do Telegram para o Grupo da Família (ESP32 Autônomo & Nuvem Segura)
 
-- [x] **Motor de Mensagens Agronômicas Autônomo:**
+- [x] **Arquitetura 100% Segura, Oficial e Gratuita:**
+  - Migração estratégica e segura do WhatsApp para o **Telegram**: elimina qualquer risco de invasão ou leitura de QR Code da conta pessoal.
+  - O bot opera com identidade isolada (ex: `@SabiaDoSitioBot`) gerada oficialmente pelo `@BotFather`. Zero acesso a fotos, conversas particulares ou contatos.
+  - **Suporte Nativo no ESP32:** Ao contrário do WhatsApp, a API do Telegram é leve e oficial (`api.telegram.org`), permitindo que o próprio ESP32 envie alertas de emergência via HTTPS direto pelo Wi-Fi da roça sem precisar de computador ligado!
+- [x] **Motor de Mensagens Agronômicas Autônomo (`core/notificacoes-sabia.js`):**
   - `gerarResumoManha`: Boletim matinal das 06:00 com litros previstos, DAP (*Dias Após o Plantio*), fase atual da cultura, nível da caixa d'água, clima e Pro Tips de manejo.
   - `gerarResumoTarde`: Fechamento do dia às 18:00 com total irrigado, cota economizada e confirmação de repouso noturno até as 04:00.
   - `gerarAlertaEmergencia`: Mensagens formatadas exclusivamente para eventos críticos (cano seco/bomba parada, caixa crítica < 20%, filtro 120 Mesh).
@@ -91,10 +95,11 @@
     - Aviso de proximidade da colheita (ex: "Faltam 2 dias para colher o Coentro! Hora de providenciar caixaria e fechar compradores").
     - Explicações claras de manejo na reta final (ex: corte de água para concentração de açúcar °Brix no melão ou cura da casca da cebola).
     - Sugestão de revisão de cota caso o balanço registre déficit hídrico consecutivo.
-- [x] **Automação 100% Silenciosa e Sem Cringe:**
-  - Eliminação de qualquer botão de "copiar texto" manual ou links `wa.me` para compartilhamento individual.
-  - Robô opera de forma estritamente unidirecional no grupo da família do WhatsApp: apenas entrega os boletins e alertas operacionais.
-  - Permite que a família utilize o grupo livremente para conversar sobre o sítio, organizar colheitas, vendas e visitas sem interferência de bots conversacionais.
-- [x] **Integração Dupla (PWA WebApp + Daemon Node.js):**
-  - **No WebApp (`app.js` e `sheets.js`):** Modal de configuração com status do robô, URL de webhook (Evolution API, Z-API, Baileys, CallMeBot), token de autenticação, caixas de ativação (06h, 18h, emergências), prévia do texto e botão de disparo imediato de teste no grupo. Verificação periódica automática a cada 30 segundos.
-  - **No Servidor / Daemon Standalone (`pro-duo-main/bot/`):** Script `bot-whatsapp.js` pronto para rodar como serviço contínuo (PM2, Docker ou systemd), monitorando tópicos MQTT e cron local para despacho autônomo mesmo com todas as abas do navegador fechadas.
+- [x] **Interface PWA e Detecção Inteligente de Grupo (`sheets.js` & `app.js`):**
+  - Botão `✈️ Telegram` no cabeçalho do aplicativo.
+  - Botão inovador **`[🔍 Detectar Automaticamente]`**: consulta a API do Telegram (`/getUpdates`) e preenche o ID do grupo da família sem o agricultor ter que adivinhar códigos numéricos.
+  - Botão direto de teste `[🔔 Disparar Teste no Grupo]`.
+- [x] **Nuvem Gratuita no GitHub Actions (`.github/workflows/telegram-bot.yml`):**
+  - Workflow agendado para rodar às 06:00 e 18:00 (horário de Brasília) nos servidores da Microsoft/GitHub, despachando o boletim diário mesmo se o computador e o celular estiverem desligados. Custo: R$ 0,00.
+- [x] **Legado Preservado:**
+  - Código antigo e rascunhos de terceiros do WhatsApp movidos com segurança para `legacy/whatsapp-bot-legacy/`.

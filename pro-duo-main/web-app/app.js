@@ -627,40 +627,33 @@ let ultimoEnvioManhaHoje = '';
 let ultimoEnvioTardeHoje = '';
 let ultimoAlertaEmergenciaMs = 0;
 
-async function dispararWebhookWhatsApp(texto, tipo = 'geral') {
-  const url = S.site?.webhook_whatsapp;
-  if (!url) return false;
+async function dispararMensagemTelegram(texto, tipo = 'geral') {
+  const token = S.site?.telegram_token;
+  const chatId = S.site?.telegram_chat_id;
+  if (!token || !chatId) return false;
   try {
-    const headers = { 'Content-Type': 'application/json' };
-    if (S.site?.whatsapp_api_key) {
-      headers['apikey'] = S.site.whatsapp_api_key;
-      headers['Client-Token'] = S.site.whatsapp_api_key;
-    }
-
-    if (url.includes('callmebot.com')) {
-      const getUrl = `${url}?group=${encodeURIComponent(S.site?.whatsapp_destino || '')}&text=${encodeURIComponent(texto)}&apikey=${encodeURIComponent(S.site?.whatsapp_api_key || '')}`;
-      return await fetch(getUrl).then((r) => r.ok).catch(() => false);
-    } else {
-      const payload = JSON.stringify({
-        chatId: S.site?.whatsapp_destino || '',
-        number: S.site?.whatsapp_destino || '',
-        phone: S.site?.whatsapp_destino || '',
-        recipient: S.site?.whatsapp_destino || '',
-        text: texto,
-        message: texto,
-        sender: 'SABIÁ Irriga.ai',
-        tipo,
-        ts: Date.now()
-      });
-      return await fetch(url, { method: 'POST', headers, body: payload }).then((r) => r.ok).catch(() => false);
-    }
+    const url = `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`;
+    const payload = JSON.stringify({
+      chat_id: chatId,
+      text: texto,
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true
+    });
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+    const data = await res.json();
+    return !!(data && data.ok);
   } catch (e) {
     return false;
   }
 }
+const dispararWebhookWhatsApp = dispararMensagemTelegram;
 
-async function verificarDisparosAutomaticosWhatsApp() {
-  if (!S.site?.webhook_whatsapp || S.site?.whatsapp_bot_ativo === false) return;
+async function verificarDisparosAutomaticosTelegram() {
+  if (!S.site?.telegram_token || !S.site?.telegram_chat_id || S.site?.telegram_bot_ativo === false) return;
   const agora = new Date();
   const hora = agora.getHours();
   const min = agora.getMinutes();
@@ -669,21 +662,21 @@ async function verificarDisparosAutomaticosWhatsApp() {
   if (!Notif) return;
 
   // 1. Boletim Matinal das 06:00 (janela de disparo entre 06:00 e 06:20)
-  if (hora === 6 && min <= 20 && ultimoEnvioManhaHoje !== hojeStr && S.site?.whatsapp_auto_manha !== false) {
+  if (hora === 6 && min <= 20 && ultimoEnvioManhaHoje !== hojeStr && S.site?.telegram_auto_manha !== false) {
     ultimoEnvioManhaHoje = hojeStr;
     const P = planos();
     const msg = Notif.gerarResumoManha(S, P, hojeStr);
-    dispararWebhookWhatsApp(msg, 'boletim_manha');
-    audit('sistema', '☀️ Boletim matinal enviado automaticamente ao grupo do WhatsApp', 'notificacao');
+    dispararMensagemTelegram(msg, 'boletim_manha');
+    audit('sistema', '☀️ Boletim matinal enviado automaticamente ao grupo do Telegram', 'notificacao');
   }
 
   // 2. Fechamento do Entardecer das 18:00 (janela de disparo entre 18:00 e 18:20)
-  if (hora === 18 && min <= 20 && ultimoEnvioTardeHoje !== hojeStr && S.site?.whatsapp_auto_tarde !== false) {
+  if (hora === 18 && min <= 20 && ultimoEnvioTardeHoje !== hojeStr && S.site?.telegram_auto_tarde !== false) {
     ultimoEnvioTardeHoje = hojeStr;
     const P = planos();
     const msg = Notif.gerarResumoTarde(S, P, hojeStr, usadoHoje());
-    dispararWebhookWhatsApp(msg, 'boletim_tarde');
-    audit('sistema', '🌙 Fechamento do dia enviado automaticamente ao grupo do WhatsApp', 'notificacao');
+    dispararMensagemTelegram(msg, 'boletim_tarde');
+    audit('sistema', '🌙 Fechamento do dia enviado automaticamente ao grupo do Telegram', 'notificacao');
   }
 
   // 3. Queda de sinal por mais de 24 horas consecutivas (86.400.000 ms)
@@ -691,15 +684,16 @@ async function verificarDisparosAutomaticosWhatsApp() {
   if (!espOnline && S.device?.lastSeen && (Date.now() - S.device.lastSeen > 24 * 3600000) && !window.ALERTA_24H_ENVIADO) {
     window.ALERTA_24H_ENVIADO = true;
     const msg = Notif.gerarAlertaEmergencia('sabia_offline_24h', { siteNome: S.site?.nome });
-    dispararWebhookWhatsApp(msg, 'sabia_offline_24h');
-    audit('sistema', '📡 Alerta de SABIÁ offline > 24h enviado ao grupo do WhatsApp', 'segurança');
+    dispararMensagemTelegram(msg, 'sabia_offline_24h');
+    audit('sistema', '📡 Alerta de SABIÁ offline > 24h enviado ao grupo do Telegram', 'segurança');
   } else if (espOnline) {
     window.ALERTA_24H_ENVIADO = false;
   }
 }
+const verificarDisparosAutomaticosWhatsApp = verificarDisparosAutomaticosTelegram;
 
 function verificarDisparoAutomaticoEmergencia(data) {
-  if (!S.site?.webhook_whatsapp || S.site?.whatsapp_auto_emergencias === false) return;
+  if (!S.site?.telegram_token || !S.site?.telegram_chat_id || S.site?.telegram_auto_emergencias === false) return;
   const now = Date.now();
   if (now - ultimoAlertaEmergenciaMs < 15 * 60000) return; // Trava contra flood (15 min)
 
@@ -720,8 +714,8 @@ function verificarDisparoAutomaticoEmergencia(data) {
       nivel_L: data.tank_L,
       pct: Math.round(100 * (data.tank_L || 1000) / S.tank.capacity),
     });
-    dispararWebhookWhatsApp(msg, tipoAlerta);
-    audit('sistema', `🚨 Alerta de emergência (${tipoAlerta}) enviado ao grupo do WhatsApp`, 'segurança');
+    dispararMensagemTelegram(msg, tipoAlerta);
+    audit('sistema', `🚨 Alerta de emergência (${tipoAlerta}) enviado ao grupo do Telegram`, 'segurança');
   }
 }
 
@@ -1294,8 +1288,8 @@ function renderCabecalho() {
       <button class="top-btn ${S.ui.locked ? 'locked' : 'unlocked'}" onclick="alternarCadeado()" title="${S.ui.locked ? 'Toque para destravar com o PIN' : 'Toque para travar'}">
         <span>${S.ui.locked ? '🔒 Travado' : '🔓 Destravado'}</span>
       </button>
-      <button class="top-btn" onclick="abrirModalWhatsApp()" title="Boletim e Alertas para o WhatsApp">
-        <span>📲 WhatsApp</span>
+      <button class="top-btn" onclick="abrirModalTelegram()" title="Boletim e Alertas para o Telegram da Família">
+        <span>✈️ Telegram</span>
       </button>
       <button class="top-btn" onclick="abrirClaude()" title="Consultar ou enviar arquivo para o Claude">
         <span>🤖 Claude</span>

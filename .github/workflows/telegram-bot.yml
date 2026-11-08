@@ -1,0 +1,52 @@
+name: SABIÁ · Boletim Telegram Diário
+
+on:
+  schedule:
+    # 06:00 e 18:00 Horário de Brasília (09:00 e 21:00 UTC)
+    - cron: '0 9 * * *'
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+    inputs:
+      tipo:
+        description: 'Tipo de Boletim para Disparar'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - manha
+          - tarde
+          - teste
+
+jobs:
+  enviar-boletim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Executar Disparo do Boletim para o Grupo do Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TIPO_INPUT: ${{ inputs.tipo }}
+        run: |
+          if [ "$TIPO_INPUT" = "teste" ]; then
+            node pro-duo-main/bot/bot-telegram.js --teste
+          elif [ "$TIPO_INPUT" = "manha" ]; then
+            node pro-duo-main/bot/bot-telegram.js --manha
+          elif [ "$TIPO_INPUT" = "tarde" ]; then
+            node pro-duo-main/bot/bot-telegram.js --tarde
+          else
+            HORA_UTC=$(date -u +%H)
+            if [ "$HORA_UTC" -lt "15" ]; then
+              node pro-duo-main/bot/bot-telegram.js --manha
+            else
+              node pro-duo-main/bot/bot-telegram.js --tarde
+            fi
+          fi

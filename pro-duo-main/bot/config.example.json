@@ -1,8 +1,6 @@
 {
-  "webhookUrl": "https://api.callmebot.com/whatsapp.php",
-  "groupId": "1203630XXXXXXXXX@g.us",
-  "apiKey": "123456",
-  "apiType": "callmebot",
+  "botToken": "7123456789:AAHkQZp_X9...",
+  "chatId": "-1001234567890",
   "envioManhaHora": 6,
   "envioTardeHora": 18
 }

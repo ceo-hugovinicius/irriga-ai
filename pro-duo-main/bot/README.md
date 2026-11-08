@@ -1,52 +1,29 @@
-# 🤖 Bot de WhatsApp do SABIÁ — Grupo da Família
+# ✈️ SABIÁ · Robô Oficial do Telegram (Grupo da Família)
 
-Este serviço automatizado conecta o motor do **SABIÁ** diretamente ao grupo da família no WhatsApp.
-
----
-
-## 🎯 O Que o Bot Envia Sozinho no Grupo
-
-1. **☀️ 06:00 — Boletim Matinal da Lavoura:**
-   - Volume de água entregue no 1º turno das 04h por zona;
-   - Idade das plantas (DAP), fase de desenvolvimento (floração, ramas correndo, maturação);
-   - Alerta antecipado de colheita (ex: *"Colheita do Jerimum em 5 dias — hora de organizar caixas e venda"*);
-   - Explicações de manejo agronômico (ex: *"Rega reduzida no melão para apurar o açúcar (°Brix)"*);
-   - Alerta se a cota diária estiver deixando as plantas com sede há dias seguidos;
-   - Nível da caixa d'água de 5.000 L e previsão do tempo (calor/vento/chuva).
-
-2. **🌙 18:00 — Fechamento do Entardecer:**
-   - Total de litros aplicados no dia (Turno 1 + Turno 2);
-   - Saldo de cota economizada guardada na caixa;
-   - Aviso de repouso noturno até as 04:00.
-
-3. **🚨 Imediato — Alertas de Emergência do Campo:**
-   - **Cano Seco / Bomba Parada:** Alerta urgente se a válvula abrir e o sensor marcar 0 L/min.
-   - **Caixa Crítica:** Alerta se o nível cair para menos de 20% (< 1.000 L).
-
-4. **📡 Redundância 24 Horas:**
-   - **Não envia avisos por pequenas oscilações de Wi-Fi.**
-   - Envia alerta **apenas se o SABIÁ passar mais de 24 horas consecutivas sem conectar à internet.**
+Este módulo envia automaticamente resumos agronômicos e alertas em tempo real diretamente para o **grupo da família no Telegram**, com foco exclusivo em informações da lida, colheita e emergências reais do sítio.
 
 ---
 
-## 🚀 Como Conectar com o Grupo do WhatsApp
-
-O bot suporta qualquer gateway ou webhook de WhatsApp:
-
-### Opção 1: CallMeBot (Gratuito e sem servidor intermediário)
-- Adicione o bot do CallMeBot ao grupo do WhatsApp conforme instruções do serviço;
-- Copie a URL gerada e preencha em `config.json` ou na interface web em **Ajustes ➔ Robô do WhatsApp**.
-
-### Opção 2: Evolution API / Z-API (Gateway Próprio)
-- Crie uma instância no seu servidor ou serviço na nuvem;
-- Aponte a URL do webhook (ex: `https://sua-api.com/message/sendText/instancia`) e o ID do grupo (`1203630XXXX@g.us`).
+## 🛡️ Por que Telegram?
+- **100% Gratuito & Oficial:** Utiliza a API oficial do Telegram Bot via HTTPS direto.
+- **Privacidade Total:** Zero acesso às suas conversas, fotos ou mensagens privadas. O bot tem identidade própria (ex: `@SabiaDoSitioBot`).
+- **Autônomo & Leve:** Pode ser disparado diretamente pelo **ESP32** com poucas linhas de C++, pelo **GitHub Actions** (na nuvem) ou pelo **WebApp**.
+- **Sem Servidor Obrigatório:** Não exige Raspberry Pi nem computador ligado 24h na tomada.
 
 ---
 
-## 💻 Executando o Bot
+## ☀️ Boletins & Alertas
+1. **06:00 (Manhã):** Status das culturas, Dias Após o Plantio (DAP), previsão do tempo, nível da caixa d'água e Pro Tip agronômica.
+2. **18:00 (Entardecer):** Total irrigado no dia, cota economizada e confirmação de repouso noturno até as 04:00.
+3. **🚨 Emergências Reais:** Cano seco (válvula aberta com 0 L/min — bomba parada ou registro fechado) e caixa d'água crítica (< 20%).
+4. **📡 Conexão:** Alerta de desconexão disparado **estritamente após 24 horas consecutivas sem ping**.
 
-```bash
-# Executar diretamente com Node.js
-node pro-duo-main/bot/bot-whatsapp.js
-```
-*(Também pode ser executado em segundo plano via PM2, Docker, n8n ou cron job na nuvem).*
+---
+
+## 🚀 Como Obter o Token do Bot (Em 1 Minuto)
+1. No Telegram, procure pelo usuário oficial **`@BotFather`** e mande a mensagem:  
+   `/newbot`
+2. Escolha um nome (ex: `SABIÁ - Sítio Seridó`) e um usuário (ex: `SabiaSitioBot`).
+3. O `@BotFather` responderá na hora com o seu **Token de Acesso** (ex: `7123456789:AAHkQZp_X9...`).
+4. Crie um grupo no Telegram, adicione os familiares e adicione o seu bot lá dentro.
+5. No WebApp do SABIÁ, clique em **✈️ Telegram**, cole o Token e clique em **🔍 Detectar Automaticamente** para achar o ID do Grupo!

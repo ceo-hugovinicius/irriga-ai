@@ -1129,14 +1129,14 @@ function abrirAjustes() {
       </div>
     </div>
 
-    <!-- WhatsApp & Alertas do Sítio -->
+    <!-- Telegram & Alertas do Sítio -->
     <div class="card" style="margin-top:14px;background:var(--sub);padding:12px 14px;border:1px solid var(--line)">
       <div class="row between" style="align-items:center">
         <div>
-          <div class="t13 b">📲 WhatsApp do Sítio & Família</div>
+          <div class="t13 b">✈️ Telegram do Sítio & Família</div>
           <div class="t12 mute">Boletins diários, Pro Tips e alertas no grupo</div>
         </div>
-        <button class="btn green sm" onclick="abrirModalWhatsApp('manha')">Abrir 📲</button>
+        <button class="btn green sm" onclick="abrirModalTelegram('manha')">Abrir ✈️</button>
       </div>
     </div>
 
@@ -1231,16 +1231,16 @@ function abrirModalSabia() {
       </button>
       <button class="btn full" onclick="fecharModal()">Fechar</button>
     </div>
-    <button class="btn green full sm" style="margin-top:8px" onclick="abrirModalWhatsApp('manha')">
-      📲 Ver Boletim do SABIÁ para o WhatsApp
+    <button class="btn green full sm" style="margin-top:8px" onclick="abrirModalTelegram('manha')">
+      ✈️ Ver Boletim do SABIÁ para o Telegram
     </button>
   `);
 }
 
 /* ============================================================================
- * 9. MODAL DE AUTOMAÇÃO · ROBÔ DO WHATSAPP (GRUPO DA FAMÍLIA)
+ * 9. MODAL DE AUTOMAÇÃO · ROBÔ DO TELEGRAM (GRUPO DA FAMÍLIA)
  * ========================================================================== */
-function abrirModalWhatsApp(aba = 'robo', subtipoAlerta = 'tubo_seco') {
+function abrirModalTelegram(aba = 'robo', subtipoAlerta = 'tubo_seco') {
   const Notif = window.SabiaNotificacoes;
   if (!Notif) {
     toast('⚠️ Módulo de notificações carregando...');
@@ -1266,101 +1266,136 @@ function abrirModalWhatsApp(aba = 'robo', subtipoAlerta = 'tubo_seco') {
     });
   }
 
-  const botConfigurado = !!(S.site?.webhook_whatsapp);
+  const botConfigurado = !!(S.site?.telegram_token && S.site?.telegram_chat_id);
 
-  window._salvarConfigRoboWhatsApp = function() {
+  window._salvarConfigRoboTelegram = function() {
     if (!S.site) S.site = {};
-    const urlInput = document.getElementById('zap-webhook-url');
-    const destInput = document.getElementById('zap-dest-number');
-    const keyInput = document.getElementById('zap-api-key');
-    const autoManha = document.getElementById('zap-check-manha');
-    const autoTarde = document.getElementById('zap-check-tarde');
-    const autoEmerg = document.getElementById('zap-check-emerg');
+    const tokenInput = document.getElementById('tg-bot-token');
+    const chatInput = document.getElementById('tg-chat-id');
+    const autoManha = document.getElementById('tg-check-manha');
+    const autoTarde = document.getElementById('tg-check-tarde');
+    const autoEmerg = document.getElementById('tg-check-emerg');
 
-    if (urlInput) S.site.webhook_whatsapp = urlInput.value.trim();
-    if (destInput) S.site.whatsapp_destino = destInput.value.trim();
-    if (keyInput) S.site.whatsapp_api_key = keyInput.value.trim();
-    if (autoManha) S.site.whatsapp_auto_manha = autoManha.checked;
-    if (autoTarde) S.site.whatsapp_auto_tarde = autoTarde.checked;
-    if (autoEmerg) S.site.whatsapp_auto_emergencias = autoEmerg.checked;
-    S.site.whatsapp_bot_ativo = true;
+    if (tokenInput) S.site.telegram_token = tokenInput.value.trim();
+    if (chatInput) S.site.telegram_chat_id = chatInput.value.trim();
+    if (autoManha) S.site.telegram_auto_manha = autoManha.checked;
+    if (autoTarde) S.site.telegram_auto_tarde = autoTarde.checked;
+    if (autoEmerg) S.site.telegram_auto_emergencias = autoEmerg.checked;
+    S.site.telegram_bot_ativo = true;
 
     salvarConfigCloud();
     salvarLocal();
-    toast('💾 Configurações do Robô salvas! Mensagens ativas no grupo.');
-    abrirModalWhatsApp('robo');
+    toast('💾 Configurações do Telegram salvas!');
+    abrirModalTelegram('robo');
   };
 
-  window._testarDisparoNoGrupo = async function(customTexto = null) {
-    const url = S.site?.webhook_whatsapp;
-    if (!url) {
-      toast('⚠️ Preencha a URL do Webhook do WhatsApp antes de testar.');
+  window._detectarChatIdTelegram = async function() {
+    const tokenInput = document.getElementById('tg-bot-token');
+    const token = tokenInput ? tokenInput.value.trim() : (S.site?.telegram_token || '');
+    if (!token) {
+      toast('⚠️ Preencha o Token do Bot antes de detectar o grupo.');
       return;
     }
-    const envio = customTexto || textoMsg || `🔔 *TESTE OPERACIONAL DO SABIÁ* 🦅\n📍 *${S.site?.nome || 'Sítio'}*\n\nConexão com o grupo da família realizada com sucesso! O robô enviará boletins diários às 06:00 e 18:00.`;
-    toast('🔔 Disparando mensagem para o grupo do WhatsApp...');
+    toast('🔍 Buscando mensagens recentes no bot do Telegram...');
     try {
-      if (typeof dispararWebhookWhatsApp === 'function') {
-        const ok = await dispararWebhookWhatsApp(envio, 'teste');
+      const res = await fetch(`https://api.telegram.org/bot${encodeURIComponent(token)}/getUpdates`);
+      const data = await res.json();
+      if (!data.ok || !data.result || data.result.length === 0) {
+        toast('ℹ️ Nenhuma mensagem encontrada. Adicione o bot ao grupo e envie qualquer mensagem (ex: /start).');
+        return;
+      }
+      // Procura a última mensagem de grupo ou supergrupo
+      let chatEncontrado = null;
+      for (let i = data.result.length - 1; i >= 0; i--) {
+        const msg = data.result[i].message || data.result[i].channel_post;
+        if (msg && msg.chat) {
+          chatEncontrado = msg.chat;
+          break;
+        }
+      }
+      if (chatEncontrado) {
+        const chatInput = document.getElementById('tg-chat-id');
+        if (chatInput) chatInput.value = chatEncontrado.id;
+        toast(`✅ Grupo detectado: "${chatEncontrado.title || chatEncontrado.first_name || 'Grupo'}" (ID: ${chatEncontrado.id})`);
+      } else {
+        toast('ℹ️ Envie uma mensagem dentro do grupo do Telegram e tente de novo.');
+      }
+    } catch (e) {
+      toast('❌ Falha ao consultar a API do Telegram.');
+    }
+  };
+
+  window._testarDisparoNoGrupoTelegram = async function(customTexto = null) {
+    const token = S.site?.telegram_token;
+    const chatId = S.site?.telegram_chat_id;
+    if (!token || !chatId) {
+      toast('⚠️ Configure o Token e o Chat ID do Telegram antes de testar.');
+      return;
+    }
+    const envio = customTexto || textoMsg || `🔔 *TESTE OPERACIONAL DO SABIÁ* 🦅\n📍 *${S.site?.nome || 'Sítio'}*\n\nConexão com o grupo da família realizada com sucesso! O robô enviará boletins diários às 06:00 e 18:00 com 100% de segurança e privacidade.`;
+    toast('🔔 Disparando mensagem para o grupo do Telegram...');
+    try {
+      if (typeof dispararMensagemTelegram === 'function') {
+        const ok = await dispararMensagemTelegram(envio, 'teste');
         if (ok) {
-          toast('✅ Mensagem entregue no grupo do WhatsApp com sucesso!');
-          if (typeof audit === 'function') audit('app', '🔔 Mensagem de teste enviada ao grupo do WhatsApp', 'notificacao');
+          toast('✅ Mensagem entregue no grupo do Telegram com sucesso!');
+          if (typeof audit === 'function') audit('app', '🔔 Mensagem de teste enviada ao grupo do Telegram', 'notificacao');
         } else {
-          toast('⚠️ Gateway respondeu com falha. Verifique URL e Token.');
+          toast('⚠️ Telegram respondeu com erro. Verifique se o Bot é membro do grupo.');
         }
       }
     } catch (e) {
-      toast('❌ Falha ao conectar ao serviço de WhatsApp.');
+      toast('❌ Falha ao conectar ao Telegram.');
     }
   };
 
   abrirModal(`
     <div class="row between" style="margin-bottom:8px;align-items:center">
       <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:30px">🤖</span>
+        <span style="font-size:30px">✈️</span>
         <div>
-          <h3 style="margin:0">Robô do WhatsApp (Grupo da Família)</h3>
-          <div class="t12 mute">Envio 100% automático dos boletins da roça e emergências</div>
+          <h3 style="margin:0">Robô do Telegram (Grupo da Família)</h3>
+          <div class="t12 mute">Envio 100% autônomo, seguro e oficial direto do ESP32/Nuvem</div>
         </div>
       </div>
       <span class="pill ${botConfigurado ? 'green' : 'amber'}" style="font-size:11px;font-weight:700">
-        ${botConfigurado ? '🟢 Bot Conectado' : '🟠 Aguardando URL'}
+        ${botConfigurado ? '🟢 Bot Conectado' : '🟠 Aguardando Dados'}
       </span>
     </div>
 
     <!-- Navegação de Abas -->
     <div class="seg" style="margin:12px 0 14px 0">
-      <button class="${aba === 'robo' ? 'sel' : ''}" onclick="abrirModalWhatsApp('robo')">⚙️ Robô & Grupo</button>
-      <button class="${aba === 'manha' ? 'sel' : ''}" onclick="abrirModalWhatsApp('manha')">☀️ Manhã (06h)</button>
-      <button class="${aba === 'tarde' ? 'sel' : ''}" onclick="abrirModalWhatsApp('tarde')">🌙 Noite (18h)</button>
-      <button class="${aba === 'alertas' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', '${subtipoAlerta}')">🚨 Alertas</button>
+      <button class="${aba === 'robo' ? 'sel' : ''}" onclick="abrirModalTelegram('robo')">⚙️ Robô & Grupo</button>
+      <button class="${aba === 'manha' ? 'sel' : ''}" onclick="abrirModalTelegram('manha')">☀️ Manhã (06h)</button>
+      <button class="${aba === 'tarde' ? 'sel' : ''}" onclick="abrirModalTelegram('tarde')">🌙 Noite (18h)</button>
+      <button class="${aba === 'alertas' ? 'sel' : ''}" onclick="abrirModalTelegram('alertas', '${subtipoAlerta}')">🚨 Alertas</button>
     </div>
 
     ${aba === 'robo' ? `
-      <!-- Configurações do Bot / Webhook do Grupo -->
+      <!-- Configurações do Bot do Telegram -->
       <div class="card" style="background:var(--sub);border:1px solid var(--line);padding:14px;margin-bottom:14px">
-        <div class="t13 b" style="margin-bottom:4px">👥 Conectar ao Grupo da Família</div>
+        <div class="t13 b" style="margin-bottom:4px">👥 Conectar ao Grupo do Telegram</div>
         <p class="t12 mute" style="margin-bottom:12px;line-height:1.5">
-          O bot entrega os boletins no grupo e fica em silêncio. Não responde mensagens (o site serve pra isso), deixando a família livre para conversar sobre as colheitas e vendas.
+          O bot entrega os boletins no grupo de forma oficial e silenciosa. Não tem acesso a conversas particulares, fotos ou dados pessoais.
         </p>
 
         <div class="field">
-          <label>URL do Webhook / Gateway do WhatsApp</label>
-          <input id="zap-webhook-url" type="url" placeholder="Ex: https://api.green-api.com/waInstance.../sendMessage/... ou Webhook" value="${esc(S.site?.webhook_whatsapp || '')}" />
+          <label>Token do Bot (obtido no @BotFather do Telegram)</label>
+          <input id="tg-bot-token" type="password" placeholder="Ex: 7123456789:AAHkQZp_X9..." value="${esc(S.site?.telegram_token || '')}" />
         </div>
 
         <div class="field" style="margin-top:10px">
-          <label>ID do Grupo do WhatsApp (chatId @g.us)</label>
-          <input id="zap-dest-number" type="text" placeholder="Ex: 120363040377656518@g.us" value="${esc(S.site?.whatsapp_destino || '')}" />
+          <div class="row between" style="align-items:center;margin-bottom:4px">
+            <label style="margin:0">ID do Grupo do Telegram (Chat ID)</label>
+            <button class="btn sm" onclick="window._detectarChatIdTelegram()" style="padding:2px 8px;font-size:11px" title="Busca automaticamente o grupo em que o bot foi adicionado">
+              🔍 Detectar Automaticamente
+            </button>
+          </div>
+          <input id="tg-chat-id" type="text" placeholder="Ex: -1001234567890 ou @nomedogrupo" value="${esc(S.site?.telegram_chat_id || '')}" />
         </div>
 
-        <div class="field" style="margin-top:10px">
-          <label>Chave de API / Token do Gateway (opcional)</label>
-          <input id="zap-api-key" type="password" placeholder="Token ou apiKey do serviço (se não estiver na URL)" value="${esc(S.site?.whatsapp_api_key || '')}" />
-        </div>
-
-        <div class="locked-note" style="margin-top:12px;font-size:12px;background:var(--blue-bg);color:var(--blue);border-color:var(--blue-bd)">
-          💡 <b>Sem servidor ou Raspberry Pi?</b> É possível usar o plano gratuito da nuvem (ex: <b>GREEN-API</b>). Você cria o grupo no WhatsApp, conecta a conta gratuita lendo um QR Code, e o robô passa a enviar para o grupo 24h sem custo!
+        <div class="locked-note" style="margin-top:12px;font-size:12px;background:var(--green-bg);color:var(--green);border-color:var(--green-bd)">
+          🛡️ <b>Segurança e Privacidade Máxima:</b> O Telegram não pede leitura de QR Code da sua conta. O robô tem identidade própria e opera de graça direto pelo ESP32 ou pela nuvem sem precisar de PC ligado!
         </div>
 
         <div class="list" style="margin-top:14px">
@@ -1369,21 +1404,21 @@ function abrirModalWhatsApp(aba = 'robo', subtipoAlerta = 'tubo_seco') {
               <div class="t13 b">☀️ Boletim Matinal às 06:00</div>
               <div class="t12 mute">Status da lavoura, DAP e Pro Tip agronômica do dia</div>
             </div>
-            <input id="zap-check-manha" type="checkbox" style="width:20px;height:20px" ${S.site?.whatsapp_auto_manha !== false ? 'checked' : ''} />
+            <input id="tg-check-manha" type="checkbox" style="width:20px;height:20px" ${S.site?.telegram_auto_manha !== false ? 'checked' : ''} />
           </div>
           <div class="li" style="padding:8px 0;border-bottom:1px solid var(--line)">
             <div>
               <div class="t13 b">🌙 Fechamento do Dia às 18:00</div>
               <div class="t12 mute">Total regado, cota economizada e repouso noturno</div>
             </div>
-            <input id="zap-check-tarde" type="checkbox" style="width:20px;height:20px" ${S.site?.whatsapp_auto_tarde !== false ? 'checked' : ''} />
+            <input id="tg-check-tarde" type="checkbox" style="width:20px;height:20px" ${S.site?.telegram_auto_tarde !== false ? 'checked' : ''} />
           </div>
           <div class="li" style="padding:8px 0">
             <div>
               <div class="t13 b">🚨 Alertas Urgentes Imediatos</div>
               <div class="t12 mute">Cano seco, bomba sem vazão ou caixa abaixo de 20%</div>
             </div>
-            <input id="zap-check-emerg" type="checkbox" style="width:20px;height:20px" ${S.site?.whatsapp_auto_emergencias !== false ? 'checked' : ''} />
+            <input id="tg-check-emerg" type="checkbox" style="width:20px;height:20px" ${S.site?.telegram_auto_emergencias !== false ? 'checked' : ''} />
           </div>
         </div>
 
@@ -1392,10 +1427,10 @@ function abrirModalWhatsApp(aba = 'robo', subtipoAlerta = 'tubo_seco') {
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
-          <button class="btn blue full" onclick="window._salvarConfigRoboWhatsApp()">
+          <button class="btn blue full" onclick="window._salvarConfigRoboTelegram()">
             💾 Salvar Configurações
           </button>
-          <button class="btn full" onclick="window._testarDisparoNoGrupo()">
+          <button class="btn full" onclick="window._testarDisparoNoGrupoTelegram()">
             🔔 Disparar Teste no Grupo
           </button>
         </div>
@@ -1406,10 +1441,10 @@ function abrirModalWhatsApp(aba = 'robo', subtipoAlerta = 'tubo_seco') {
         <div style="margin-bottom:12px">
           <label class="t12 b mute" style="display:block;margin-bottom:6px">Selecione o Tipo de Alerta para Visualizar:</label>
           <div class="seg" style="flex-wrap:wrap">
-            <button class="${subtipoAlerta === 'tubo_seco' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'tubo_seco')">🚨 Tubo Seco</button>
-            <button class="${subtipoAlerta === 'caixa_critica' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'caixa_critica')">🪣 Caixa Baixa</button>
-            <button class="${subtipoAlerta === 'filtro_sujo' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'filtro_sujo')">🧹 Filtro 120M</button>
-            <button class="${subtipoAlerta === 'sabia_offline_24h' ? 'sel' : ''}" onclick="abrirModalWhatsApp('alertas', 'sabia_offline_24h')">📡 Sem Sinal >24h</button>
+            <button class="${subtipoAlerta === 'tubo_seco' ? 'sel' : ''}" onclick="abrirModalTelegram('alertas', 'tubo_seco')">🚨 Tubo Seco</button>
+            <button class="${subtipoAlerta === 'caixa_critica' ? 'sel' : ''}" onclick="abrirModalTelegram('alertas', 'caixa_critica')">🪣 Caixa Baixa</button>
+            <button class="${subtipoAlerta === 'filtro_sujo' ? 'sel' : ''}" onclick="abrirModalTelegram('alertas', 'filtro_sujo')">🧹 Filtro 120M</button>
+            <button class="${subtipoAlerta === 'sabia_offline_24h' ? 'sel' : ''}" onclick="abrirModalTelegram('alertas', 'sabia_offline_24h')">📡 Sem Sinal >24h</button>
           </div>
         </div>
       ` : ''}
@@ -1426,7 +1461,7 @@ ${esc(textoMsg)}
         </div>
       </div>
 
-      <button class="btn green full" style="font-weight:700;margin-bottom:10px" onclick="window._testarDisparoNoGrupo('${esc(textoMsg).replace(/'/g, "\\'")}')">
+      <button class="btn green full" style="font-weight:700;margin-bottom:10px" onclick="window._testarDisparoNoGrupoTelegram('${esc(textoMsg).replace(/'/g, "\\'")}')">
         🔔 Disparar Este Boletim no Grupo Agora
       </button>
     `}
@@ -1434,3 +1469,6 @@ ${esc(textoMsg)}
     <button class="btn full" onclick="fecharModal()">Fechar</button>
   `);
 }
+
+// Retrocompatibilidade
+window.abrirModalWhatsApp = abrirModalTelegram;

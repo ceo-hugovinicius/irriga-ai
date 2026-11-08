@@ -120,9 +120,9 @@ static inline float chuvaEfetiva(float mm) { return mm > 2.0f ? 0.8f * (mm - 2.0
 
 void beep(uint16_t ms = 80, uint8_t times = 1) {
     for (uint8_t i = 0; i < times; i++) {
-        digitalWrite(PIN_BUZZER, HIGH);
+        tone(PIN_BUZZER, 2400, ms);
         delay(ms);
-        digitalWrite(PIN_BUZZER, LOW);
+        noTone(PIN_BUZZER);
         if (i + 1 < times) delay(60);
     }
 }
@@ -260,12 +260,13 @@ struct BtnTracker {
     bool lastLevel;
     uint32_t downMs;
     bool longHandled;
+    bool wasSleeping;
 };
 BtnTracker btns[4] = {
-    { PIN_BTN_PAUSE,       HIGH, 0, false },
-    { PIN_BTN_WATER_NOW,   HIGH, 0, false },
-    { PIN_BTN_WISH_RAIN,   HIGH, 0, false },
-    { PIN_BTN_RAINED_HERE, HIGH, 0, false }
+    { PIN_BTN_PAUSE,       HIGH, 0, false, false },
+    { PIN_BTN_WATER_NOW,   HIGH, 0, false, false },
+    { PIN_BTN_WISH_RAIN,   HIGH, 0, false, false },
+    { PIN_BTN_RAINED_HERE, HIGH, 0, false, false }
 };
 uint8_t rainClicksCount = 0;
 uint32_t lastRainClickMs = 0;
@@ -277,16 +278,18 @@ void processarBotoesFisicos() {
         if (lvl == LOW && btns[i].lastLevel == HIGH) {
             btns[i].downMs = now;
             btns[i].longHandled = false;
-        } else if (lvl == LOW && !btns[i].longHandled) {
-            // Se OLED estava apagado e segurou 1s: só acorda a tela
-            if (!oledAwake && (now - btns[i].downMs >= 1000)) {
+            if (!oledAwake) {
+                // Tela estava dormindo: acorda imediatamente e NÃO executa a função do botão
                 oledAwake = true;
                 lastInteraction = now;
-                btns[i].longHandled = true;
+                btns[i].wasSleeping = true;
                 beep(40, 1);
+            } else {
+                btns[i].wasSleeping = false;
             }
-            // B1 segurado por 3s = Pausa sem prazo
-            if (i == 0 && oledAwake && (now - btns[i].downMs >= 3000)) {
+        } else if (lvl == LOW && !btns[i].longHandled && !btns[i].wasSleeping) {
+            // B1 segurado por 3s = Pausa sem prazo (somente com a tela já acesa)
+            if (i == 0 && (now - btns[i].downMs >= 3000)) {
                 isPaused = true;
                 pauseIndefinite = true;
                 fecharTodasValvulas();
@@ -295,8 +298,10 @@ void processarBotoesFisicos() {
             }
         } else if (lvl == HIGH && btns[i].lastLevel == LOW) {
             uint32_t held = now - btns[i].downMs;
-            if (held >= 40 && !btns[i].longHandled) {
-                oledAwake = true;
+            if (btns[i].wasSleeping) {
+                // Apenas acordou a tela: reseta e ignora a ação do botão
+                btns[i].wasSleeping = false;
+            } else if (held >= 40 && !btns[i].longHandled) {
                 lastInteraction = now;
                 beep(60, 1);
                 if (i == 0) { // B1: Pausa 2h c/ retomada auto ou Retoma

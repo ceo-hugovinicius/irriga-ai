@@ -41,9 +41,9 @@
     [ "esp:GND.1", "sw_tank:4b", "black", [] ],
     [ "esp:D4", "led_r1_master:C", "cyan", [] ],
     [ "esp:3V3", "led_r1_master:A", "red", [] ],
-    [ "esp:D16", "led_r2_z1:C", "green", [] ],
+    [ "esp:RX2", "led_r2_z1:C", "green", [] ],
     [ "esp:3V3", "led_r2_z1:A", "red", [] ],
-    [ "esp:D17", "led_r3_z2:C", "orange", [] ],
+    [ "esp:TX2", "led_r3_z2:C", "orange", [] ],
     [ "esp:3V3", "led_r3_z2:A", "red", [] ],
     [ "esp:D23", "led_r6_pump:C", "purple", [] ],
     [ "esp:3V3", "led_r6_pump:A", "red", [] ]

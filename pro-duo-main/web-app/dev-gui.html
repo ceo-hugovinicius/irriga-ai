@@ -63,13 +63,12 @@
 
     function lerEstado() {
       try {
-        const raw = localStorage.getItem(KEY) || localStorage.getItem('irriga_argon_v1_5_2') || localStorage.getItem('irriga_argon_v1_5');
+        const raw = localStorage.getItem(KEY);
         if (raw) return JSON.parse(raw);
       } catch (e) {}
       const s = C.estadoPadrao();
-      const t = C.isoDate(new Date());
-      s.zones[0].crop = { id: 'maxixe', plantio: C.addDays(t, -34), anterior: 'Leguminosas' };
-      s.zones[1].crop = { id: 'melancia', plantio: C.addDays(t, -67), anterior: 'Convolvuláceas' };
+      s.zones[0].crop = null;
+      s.zones[1].crop = null;
       s.weather = { fetched: Date.now(), days: [] };
       s.filtro = { pct: 96 };
       s.chuvaLocal = {};

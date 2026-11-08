@@ -59,7 +59,7 @@ function migrarZona(z, idx) {
 
 function carregar() {
   try {
-    const raw = localStorage.getItem(KEY) || localStorage.getItem('irriga_argon_v1_5_2') || localStorage.getItem('irriga_argon_v1_6') || localStorage.getItem('irriga_argon_v1_5');
+    const raw = localStorage.getItem(KEY);
     if (raw) {
       const st = Object.assign(novoEstado(), JSON.parse(raw));
       st.versao = '1.6.7.a';
@@ -75,12 +75,27 @@ function carregar() {
       return st;
     }
   } catch (e) { /* estado novo */ }
+
+  // Limpa chaves legadas obsoletas para impedir que ressuscitem culturas de demonstração antigas
+  try {
+    localStorage.removeItem('irriga_argon_v1_5_2');
+    localStorage.removeItem('irriga_argon_v1_6');
+    localStorage.removeItem('irriga_argon_v1_5');
+  } catch (e) {}
+
   return novoEstado();
 }
-window.MQTT_CLIENT_ID = 'irriga-web-' + Math.random().toString(16).substring(2, 10);
+
+// Client ID persistente por sessão da aba para evitar colisões
+let savedMqttId = null;
+try { savedMqttId = sessionStorage.getItem('irriga_mqtt_client_id'); } catch (e) {}
+if (!savedMqttId) {
+  savedMqttId = 'irriga-web-' + Math.random().toString(16).substring(2, 10);
+  try { sessionStorage.setItem('irriga_mqtt_client_id', savedMqttId); } catch (e) {}
+}
+window.MQTT_CLIENT_ID = savedMqttId;
 
 function salvarLocal() {
-  if (!S.ts) S.ts = Date.now();
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
 }
 
@@ -93,12 +108,25 @@ function agendarSincronizacaoNuvem() {
   }, 120);
 }
 
+// salvar() é chamado EXCLUSIVAMENTE quando o usuário altera parâmetros de configuração!
 function salvar() {
   S.ts = Date.now();
   salvarLocal();
   agendarSincronizacaoNuvem();
 }
-window.addEventListener('storage', (e) => { if (e.key === KEY) { S = carregar(); render(); } });
+
+window.addEventListener('storage', (e) => {
+  if (e.key === KEY && e.newValue) {
+    try {
+      const novoSt = JSON.parse(e.newValue);
+      if (novoSt && novoSt.ts && (!S.ts || novoSt.ts > S.ts)) {
+        console.log('🔄 [Storage Event] Sincronizando com alteração mais recente feita em outra aba:', novoSt.ts);
+        S = carregar();
+        render();
+      }
+    } catch (err) {}
+  }
+});
 
 function salvarConfigCloud() {
   if (!S.ts) S.ts = Date.now();
@@ -181,7 +209,7 @@ function audit(origem, texto, tipo = 'info', meta = null) {
   const id = 'ev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   S.auditoria.unshift({ id, ts: Date.now(), origem, texto, tipo, meta });
   S.auditoria = S.auditoria.slice(0, 100);
-  salvar();
+  salvarLocal();
   return id;
 }
 
@@ -195,7 +223,7 @@ async function buscarClima(avisarUsuario = false) {
     S.weather = { fetched: Date.now(), erro: null, days: d.time.map((t, i) => ({
       date: t, et0: d.et0_fao_evapotranspiration[i] ?? C.climatologia(t).et0, rain: d.precipitation_sum[i] ?? 0,
       rain_prob: d.precipitation_probability_max[i] ?? (t < hoje() ? 100 : 0), tmax: d.temperature_2m_max[i], tmin: d.temperature_2m_min[i], wind: d.wind_speed_10m_max[i] })) };
-    salvar();
+    salvarLocal();
     if (avisarUsuario) toast('🛰️ Clima atualizado via satélite!');
   } catch (e) {
     S.weather.erro = 'offline';
@@ -230,7 +258,7 @@ function fecharDiasPendentes() {
     S.ultimoDiaFechado = d; d = C.addDays(d, 1);
   }
   if (S.pause.until && Date.parse(S.pause.until) < Date.now() && !S.pause.indefinite) retomar('sistema', true);
-  salvar();
+  salvarLocal();
 }
 
 function planos() {
@@ -943,7 +971,7 @@ async function sincronizarEsp32() {
     if (typeof st.filter_pct === 'number') S.filtro.pct = st.filter_pct;
     await fetch(base + '/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(compilarPacoteEsp32()) });
   } catch (e) { if (!window.MQTT_CONNECTED) S.device.online = false; }
-  salvar();
+  salvarLocal();
 }
 
 /* ============================================================================
@@ -1764,7 +1792,7 @@ function iniciarTimerRelock() {
   if (timerRelock) clearTimeout(timerRelock);
   timerRelock = setTimeout(() => {
     S.ui.locked = true;
-    salvar();
+    salvarLocal();
     render();
     toast('🔒 Painel travado automaticamente por inatividade.');
   }, 10 * 60 * 1000);
@@ -1774,7 +1802,7 @@ function solicitarDestravamentoComPin(onSuccess) {
   if (!S.security || S.security.enabled === false) {
     S.ui.locked = false;
     iniciarTimerRelock();
-    salvar();
+    salvarLocal();
     render();
     if (typeof onSuccess === 'function') onSuccess();
     return;
@@ -1783,7 +1811,7 @@ function solicitarDestravamentoComPin(onSuccess) {
     abrirModalPin(onSuccess);
   } else {
     S.ui.locked = false;
-    salvar();
+    salvarLocal();
     render();
     if (typeof onSuccess === 'function') onSuccess();
   }
@@ -1795,7 +1823,7 @@ function alternarCadeado() {
   } else {
     S.ui.locked = true;
     if (timerRelock) clearTimeout(timerRelock);
-    salvar();
+    salvarLocal();
     render();
     toast('🔒 Painel travado com sucesso.');
   }
@@ -1813,8 +1841,25 @@ async function instalarPwa() {
 }
 
 /* ---------------- Inicialização e Sincronização Dinâmica (iOS / Desktop) ---------------- */
+function verificarAtualizacaoExterna() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const localSt = JSON.parse(raw);
+      if (localSt && localSt.ts && (!S.ts || localSt.ts > S.ts)) {
+        console.log('🔄 [Sincronia] Atualizando aba com dados mais recentes de outra sessão:', localSt.ts, 'vs antigo', S.ts);
+        S = carregar();
+        render();
+        return true;
+      }
+    }
+  } catch (e) {}
+  return false;
+}
+
 async function forcarAtualizacaoManual() {
   toast('🔄 Sincronizando dados...');
+  verificarAtualizacaoExterna();
   fecharDiasPendentes();
   await buscarClima(false);
   if (!window.MQTT_CONNECTED && !window.MQTT_CONNECTING) {
@@ -1826,6 +1871,7 @@ async function forcarAtualizacaoManual() {
 }
 
 function acordarApp() {
+  verificarAtualizacaoExterna();
   fecharDiasPendentes();
   if (!window.MQTT_CONNECTED && !window.MQTT_CONNECTING) {
     iniciarMqttNuvem();

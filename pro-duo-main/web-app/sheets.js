@@ -146,7 +146,7 @@ function abrirModalPin(onSuccess) {
       limparErrosPin();
       S.ui.locked = false;
       if (typeof iniciarTimerRelock === 'function') iniciarTimerRelock();
-      salvar();
+      salvarLocal();
       render();
       fecharModal();
       toast('🔓 Painel destravado com sucesso!');
@@ -1091,8 +1091,8 @@ function abrirAjustes() {
     <div class="field">
       <label>Aparência da tela</label>
       <div class="seg">
-        <button class="${!S.ui.dark ? 'sel' : ''}" onclick="S.ui.dark=false;salvar();render();abrirAjustes()">☀️ Tema Claro (Sol)</button>
-        <button class="${S.ui.dark ? 'sel' : ''}" onclick="S.ui.dark=true;salvar();render();abrirAjustes()">🌙 Modo Noite</button>
+        <button class="${!S.ui.dark ? 'sel' : ''}" onclick="S.ui.dark=false;salvarLocal();render();abrirAjustes()">☀️ Tema Claro (Sol)</button>
+        <button class="${S.ui.dark ? 'sel' : ''}" onclick="S.ui.dark=true;salvarLocal();render();abrirAjustes()">🌙 Modo Noite</button>
       </div>
     </div>
 

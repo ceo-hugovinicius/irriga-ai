@@ -1,7 +1,7 @@
 /* ============================================================================
  * Irriga.ai Pro-Duo · v1.6.7.a (SABIÁ) — Service Worker Offline-First (PWA)
  * ========================================================================== */
-const CACHE_NAME = 'irriga-pro-duo-v1.6.7a-telegram-bot-v1';
+const CACHE_NAME = 'irriga-pro-duo-v1.6.7a-telegram-bot-v2';
 const CORE_ASSETS = [
   './',
   './index.html',

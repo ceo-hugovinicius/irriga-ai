@@ -645,7 +645,21 @@ async function dispararMensagemTelegram(texto, tipo = 'geral') {
       body: payload
     });
     const data = await res.json();
-    return !!(data && data.ok);
+    if (data && data.ok) return true;
+
+    // Se a API do Telegram rejeitar por erro de formatação de Markdown (ex: * ou _ não fechados no texto),
+    // tenta novamente de imediato sem parse_mode para garantir 100% a entrega da mensagem!
+    const resFallback = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: texto,
+        disable_web_page_preview: true
+      })
+    });
+    const dataFallback = await resFallback.json();
+    return !!(dataFallback && dataFallback.ok);
   } catch (e) {
     return false;
   }

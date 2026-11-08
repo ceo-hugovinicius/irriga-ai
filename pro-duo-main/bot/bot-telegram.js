@@ -88,8 +88,40 @@ function enviarMensagemTelegram(texto) {
             console.log('✅ [Telegram Bot] Mensagem entregue com sucesso ao grupo!');
             return resolve(true);
           } else {
-            console.error('❌ [Telegram Bot] Erro na resposta da API:', parsed.description);
-            return resolve(false);
+            console.warn('⚠️ [Telegram Bot] Falha no envio formatado, tentando fallback sem markdown:', parsed.description);
+            // Fallback sem markdown
+            const fallbackData = JSON.stringify({
+              chat_id: config.chatId,
+              text: texto,
+              disable_web_page_preview: true,
+            });
+            const fallbackReq = https.request({
+              hostname: 'api.telegram.org',
+              port: 443,
+              path: `/bot${encodeURIComponent(config.botToken)}/sendMessage`,
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(fallbackData),
+              },
+              timeout: 10000,
+            }, (fRes) => {
+              let fBody = '';
+              fRes.on('data', (d) => { fBody += d; });
+              fRes.on('end', () => {
+                try {
+                  const fParsed = JSON.parse(fBody);
+                  if (fParsed.ok) {
+                    console.log('✅ [Telegram Bot] Mensagem entregue no fallback com sucesso!');
+                    return resolve(true);
+                  }
+                  resolve(false);
+                } catch (e) { resolve(false); }
+              });
+            });
+            fallbackReq.on('error', () => resolve(false));
+            fallbackReq.write(fallbackData);
+            fallbackReq.end();
           }
         } catch (e) {
           return resolve(false);

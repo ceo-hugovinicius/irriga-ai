@@ -1267,6 +1267,7 @@ function abrirModalTelegram(aba = 'robo', subtipoAlerta = 'tubo_seco') {
   }
 
   const botConfigurado = !!(S.site?.telegram_token && S.site?.telegram_chat_id);
+  window._boletimParaEnvio = textoMsg;
 
   window._salvarConfigRoboTelegram = function() {
     if (!S.site) S.site = {};
@@ -1461,7 +1462,7 @@ ${esc(textoMsg)}
         </div>
       </div>
 
-      <button class="btn green full" style="font-weight:700;margin-bottom:10px" onclick="window._testarDisparoNoGrupoTelegram('${esc(textoMsg).replace(/'/g, "\\'")}')">
+      <button class="btn green full" style="font-weight:700;margin-bottom:10px" onclick="window._testarDisparoNoGrupoTelegram(window._boletimParaEnvio)">
         🔔 Disparar Este Boletim no Grupo Agora
       </button>
     `}

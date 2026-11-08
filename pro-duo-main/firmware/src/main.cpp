@@ -578,19 +578,20 @@ void setup() {
     Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
     display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
 
-    // 5. Watchdog de Hardware (10 s) — compatível com ESP-IDF v4 (Arduino 2.x) e v5 (Arduino 3.x / Wokwi)
+    // 5. Watchdog de Hardware (10 s) — compatível com Wokwi (v3.x) e PlatformIO antigo (v2.x)
 #if (defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3) || (defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5)
     esp_task_wdt_config_t wdt_config = {
         .timeout_ms = 10000,
         .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
         .trigger_panic = true
     };
-    esp_task_wdt_init(&wdt_config);
-    esp_task_wdt_add(NULL);
+    esp_task_wdt_reconfigure(&wdt_config);
 #else
     esp_task_wdt_init(10, true);
     esp_task_wdt_add(NULL);
 #endif
+
+    Serial.println("🌱 [Irriga.ai] Sistema iniciado com sucesso!");
 
     recalcularPlanoDoDia();
     configurarRotasHttp();

@@ -77,3 +77,17 @@
   - O firmware publica telemetria em tempo real no `status` com `retained: false` (evita que navegadores mostrem status "online" fictício baseado em mensagens antigas retidas no broker).
   - Todos os 4 botões físicos (B1, B2, B3, B4) disparam `publicarStatusMqtt()` imediatamente ao serem tocados.
   - Simulador de vazão nominal no modo bancada/Wokwi atualizado para incrementar `delivered_today_L` proporcional ao tempo real decorrido (`dtSec`).
+
+---
+
+## 📲 Task 5: Alertas, Boletins & Pro Tips no WhatsApp (`core/notificacoes-sabia.js`)
+
+- [x] **Motor de Notificações Agronômicas:**
+  - `gerarResumoManha`: Boletim do 1º turno das 04h com litros por zona, DAP da cultura, nível da caixa d'água, previsão do tempo e Pro Tip agronômica do dia.
+  - `gerarResumoTarde`: Fechamento do dia pós 2º turno das 16h com saldo de cota economizada e aviso de repouso noturno até as 04h.
+  - `gerarAlertaEmergencia`: Mensagens formatadas para tubulação seca / bomba parada, caixa d'água crítica (< 25%), manutenção do filtro 120 Mesh e SABIÁ sem sinal.
+- [x] **Interface PWA do WhatsApp:**
+  - Botão `📲 WhatsApp` no cabeçalho e atalhos em Ajustes e no Modal do SABIÁ.
+  - Visualizador estilo balão do WhatsApp com botão de 1 clique `[📲 Abrir no WhatsApp]` e `[📋 Copiar Mensagem]`.
+  - Configuração de Webhook (CallMeBot / Evolution API / Z-API / n8n) para disparo automático de emergências.
+  - Publicação no tópico MQTT `irriga-ai/ceo-hugovinicius/notify` para bots ouvintes.

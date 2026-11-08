@@ -623,6 +623,40 @@ const MQTT_TOPIC_STATUS = 'irriga-ai/ceo-hugovinicius/status';
 const MQTT_TOPIC_PLAN = 'irriga-ai/ceo-hugovinicius/plan';
 const MQTT_TOPIC_CONFIG = 'irriga-ai/ceo-hugovinicius/config';
 let mqttReconectarTimer = null;
+let ultimoAlertaDisparadoMs = 0;
+
+function verificarDisparoAutomaticoEmergencia(data) {
+  if (!S.site?.webhook_whatsapp || S.site?.whatsapp_auto_alerts === false) return;
+  const now = Date.now();
+  if (now - ultimoAlertaDisparadoMs < 15 * 60000) return; // Proteção contra repetição (15 minutos)
+
+  let tipoAlerta = null;
+  if (data.alert && (String(data.alert).includes('CANO SECO') || String(data.alert).includes('VAZAMENTO'))) {
+    tipoAlerta = 'tubo_seco';
+  } else if (data.flow_lpm < 0.2 && data.active_rem_L > 2.0 && data.active_zone > 0) {
+    tipoAlerta = 'tubo_seco';
+  } else if (typeof data.tank_L === 'number' && data.tank_L < (S.tank.capacity * (S.tank.reserve_pct || 25) / 100)) {
+    tipoAlerta = 'caixa_critica';
+  }
+
+  if (tipoAlerta && window.SabiaNotificacoes) {
+    ultimoAlertaDisparadoMs = now;
+    const msg = window.SabiaNotificacoes.gerarAlertaEmergencia(tipoAlerta, {
+      siteNome: S.site?.nome,
+      zona: data.active_zone || 1,
+      nivel_L: data.tank_L,
+      pct: Math.round(100 * data.tank_L / S.tank.capacity),
+    });
+    fetch(S.site.webhook_whatsapp, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sender: 'SABIÁ Irriga.ai', tipo: tipoAlerta, texto: msg, ts: now })
+    }).catch(() => {});
+    if (typeof audit === 'function') {
+      audit('sistema', `🚨 Alerta de emergência (${tipoAlerta}) despachado para o WhatsApp`, 'segurança');
+    }
+  }
+}
 
 function iniciarMqttNuvem() {
   if (typeof Paho === 'undefined' || !Paho.MQTT) {
@@ -671,6 +705,7 @@ function iniciarMqttNuvem() {
         if (isOnline) {
           if (typeof data.tank_L === 'number') S.tank.level_L = data.tank_L;
           if (typeof data.filter_pct === 'number') S.filtro.pct = data.filter_pct;
+          verificarDisparoAutomaticoEmergencia(data);
         } else {
           S.device.telemetry = null;
         }
@@ -1191,6 +1226,9 @@ function renderCabecalho() {
       </button>
       <button class="top-btn ${S.ui.locked ? 'locked' : 'unlocked'}" onclick="alternarCadeado()" title="${S.ui.locked ? 'Toque para destravar com o PIN' : 'Toque para travar'}">
         <span>${S.ui.locked ? '🔒 Travado' : '🔓 Destravado'}</span>
+      </button>
+      <button class="top-btn" onclick="abrirModalWhatsApp()" title="Boletim e Alertas para o WhatsApp">
+        <span>📲 WhatsApp</span>
       </button>
       <button class="top-btn" onclick="abrirClaude()" title="Consultar ou enviar arquivo para o Claude">
         <span>🤖 Claude</span>

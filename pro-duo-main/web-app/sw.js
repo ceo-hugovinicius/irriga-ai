@@ -1,7 +1,7 @@
 /* ============================================================================
  * Irriga.ai Pro-Duo · v1.6.7.a (SABIÁ) — Service Worker Offline-First (PWA)
  * ========================================================================== */
-const CACHE_NAME = 'irriga-pro-duo-v1.6.7a-hotfix';
+const CACHE_NAME = 'irriga-pro-duo-v1.6.7a-whatsapp';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -16,7 +16,8 @@ const CORE_ASSETS = [
   './icon-512.png',
   '../core/crops.js',
   '../core/irriga-core.js',
-  '../core/yaml-lite.js'
+  '../core/yaml-lite.js',
+  '../core/notificacoes-sabia.js'
 ];
 
 self.addEventListener('install', (event) => {

@@ -424,13 +424,115 @@ function limparHistoricoEventos() {
   toast('🗑️ Histórico de eventos limpo!');
 }
 
-/* ---------------- ESP32 (opcional) ---------------- */
+/* ---------------- Conexão Nuvem MQTT (HiveMQ) & ESP32 ---------------- */
+const MQTT_TOPIC_CMD = 'irriga-ai/ceo-hugovinicius/cmd';
+const MQTT_TOPIC_STATUS = 'irriga-ai/ceo-hugovinicius/status';
+const MQTT_TOPIC_PLAN = 'irriga-ai/ceo-hugovinicius/plan';
+let mqttReconectarTimer = null;
+
+function iniciarMqttNuvem() {
+  if (typeof Paho === 'undefined' || !Paho.MQTT) {
+    console.warn('Paho MQTT não disponível');
+    return;
+  }
+  if (window.MQTT_CLIENT && (window.MQTT_CONNECTED || window.MQTT_CONNECTING)) return;
+
+  const clientId = 'irriga-web-' + Math.random().toString(16).substring(2, 10);
+  const client = new Paho.MQTT.Client('broker.hivemq.com', 8884, clientId);
+  window.MQTT_CLIENT = client;
+  window.MQTT_CONNECTING = true;
+
+  client.onConnectionLost = (resp) => {
+    window.MQTT_CONNECTED = false;
+    window.MQTT_CONNECTING = false;
+    console.log('☁️ [MQTT] Conexão com a nuvem perdida. Reconectando em 4s...');
+    if (!mqttReconectarTimer) {
+      mqttReconectarTimer = setTimeout(() => {
+        mqttReconectarTimer = null;
+        iniciarMqttNuvem();
+      }, 4000);
+    }
+    render();
+  };
+
+  client.onMessageArrived = (message) => {
+    try {
+      const data = JSON.parse(message.payloadString);
+      if (message.destinationName === MQTT_TOPIC_STATUS) {
+        console.log('📩 [MQTT] Telemetria recebida do ESP32:', data);
+        S.device = { ...S.device, online: true, lastSeen: Date.now(), status: data };
+        if (typeof data.tank_L === 'number') S.tank.level_L = data.tank_L;
+        if (typeof data.filter_pct === 'number') S.filtro.pct = data.filter_pct;
+        salvar();
+        render();
+      }
+    } catch (e) {
+      console.error('Erro ao ler mensagem MQTT:', e);
+    }
+  };
+
+  client.connect({
+    useSSL: true,
+    timeout: 5,
+    keepAliveInterval: 30,
+    cleanSession: true,
+    onSuccess: () => {
+      window.MQTT_CONNECTED = true;
+      window.MQTT_CONNECTING = false;
+      console.log('✅ [MQTT] WebApp conectado com sucesso à nuvem HiveMQ!');
+      client.subscribe(MQTT_TOPIC_STATUS);
+      // Envia o plano diário atual para o ESP32 assim que conecta
+      setTimeout(() => {
+        try {
+          const planMsg = new Paho.MQTT.Message(JSON.stringify(compilarPacoteEsp32()));
+          planMsg.destinationName = MQTT_TOPIC_PLAN;
+          planMsg.qos = 1;
+          client.send(planMsg);
+        } catch (e) {}
+      }, 1000);
+      render();
+    },
+    onFailure: (err) => {
+      window.MQTT_CONNECTED = false;
+      window.MQTT_CONNECTING = false;
+      console.warn('⚠️ [MQTT] Falha na conexão com a nuvem:', err);
+      if (!mqttReconectarTimer) {
+        mqttReconectarTimer = setTimeout(() => {
+          mqttReconectarTimer = null;
+          iniciarMqttNuvem();
+        }, 5000);
+      }
+      render();
+    }
+  });
+}
+
 async function enviarComando(cmd) {
   salvar(); render();
-  if (!S.device.url) return;
-  try { await fetch(S.device.url.replace(/\/$/, '') + '/api/cmd', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }); }
-  catch (e) { /* silencioso offline */ }
+  // 1. Envia via Nuvem MQTT (chega em qualquer lugar do mundo em ~0.1s)
+  if (window.MQTT_CLIENT && window.MQTT_CONNECTED) {
+    try {
+      const msg = new Paho.MQTT.Message(JSON.stringify(cmd));
+      msg.destinationName = MQTT_TOPIC_CMD;
+      msg.qos = 1;
+      window.MQTT_CLIENT.send(msg);
+      console.log('☁️ [MQTT] Comando enviado para o ESP32 via nuvem:', cmd);
+    } catch (e) {
+      console.warn('Erro ao despachar comando MQTT:', e);
+    }
+  }
+  // 2. Envia via HTTP local (caso configurado IP manual)
+  if (S.device.url) {
+    try {
+      await fetch(S.device.url.replace(/\/$/, '') + '/api/cmd', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cmd)
+      });
+    } catch (e) { /* silencioso offline */ }
+  }
 }
+
 function compilarPacoteEsp32() {
   return {
     v: 3, soil_taw_mm_m: C.SOLOS[S.soil].taw_mm_m, soil_wet_m: C.SOLOS[S.soil].faixa_molhada_m,
@@ -450,7 +552,17 @@ function compilarPacoteEsp32() {
     weather: previsao().filter((w) => w.date >= hoje()).slice(0, 7).map((w) => [w.date, +w.et0.toFixed(2), +(w.rain || 0).toFixed(1), w.rain_prob || 0]),
   };
 }
+
 async function sincronizarEsp32() {
+  // Se estiver conectado via MQTT, o status já é atualizado por evento em tempo real
+  if (window.MQTT_CLIENT && window.MQTT_CONNECTED) {
+    try {
+      const planMsg = new Paho.MQTT.Message(JSON.stringify(compilarPacoteEsp32()));
+      planMsg.destinationName = MQTT_TOPIC_PLAN;
+      planMsg.qos = 1;
+      window.MQTT_CLIENT.send(planMsg);
+    } catch (e) {}
+  }
   if (!S.device.url) return;
   const base = S.device.url.replace(/\/$/, '');
   try {
@@ -460,7 +572,7 @@ async function sincronizarEsp32() {
     if (typeof st.tank_L === 'number') S.tank.level_L = st.tank_L;
     if (typeof st.filter_pct === 'number') S.filtro.pct = st.filter_pct;
     await fetch(base + '/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(compilarPacoteEsp32()) });
-  } catch (e) { S.device.online = false; }
+  } catch (e) { if (!window.MQTT_CONNECTED) S.device.online = false; }
   salvar();
 }
 
@@ -610,6 +722,10 @@ function renderCabecalho() {
       </div>
     </div>
     <div class="top-actions">
+      <span class="pill ${window.MQTT_CONNECTED ? 'green' : 'amber'}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px" title="${window.MQTT_CONNECTED ? 'Conectado à Nuvem em Tempo Real' : 'Conectando à Nuvem...'}">
+        <span class="live" style="width:6px;height:6px;background:currentColor"></span>
+        <span>${window.MQTT_CONNECTED ? 'Nuvem' : 'Conectando'}</span>
+      </span>
       <button class="top-btn ${S.ui.locked ? 'locked' : 'unlocked'}" onclick="alternarCadeado()" title="Trava contra toques acidentais">
         <span>${S.ui.locked ? '🔒 Travado' : '🔓 Destravado'}</span>
       </button>
@@ -1055,6 +1171,7 @@ async function instalarPwa() {
 /* ---------------- Inicialização ---------------- */
 async function iniciar() {
   fecharDiasPendentes(); render();
+  iniciarMqttNuvem(); // Inicia a conexão MQTT em tempo real via nuvem HiveMQ
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(() => {});
   if (!S.weather.fetched || Date.now() - S.weather.fetched > 3 * 3600e3) { await buscarClima(); fecharDiasPendentes(); render(); }
   await sincronizarEsp32(); render();

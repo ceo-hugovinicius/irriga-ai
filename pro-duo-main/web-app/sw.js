@@ -6,6 +6,7 @@ const CORE_ASSETS = [
   './',
   './index.html',
   './dev-gui.html',
+  './paho-mqtt.js',
   './app.js',
   './sheets.js',
   './manifest.json',

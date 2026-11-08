@@ -19,6 +19,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <WiFi.h>
+#include <WiFiClient.h>
+#include <PubSubClient.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include <Adafruit_GFX.h>
@@ -105,9 +107,21 @@ void IRAM_ATTR onSf1Pulse() {
     sf1Pulses++;
 }
 
-// --- Display OLED e Servidor HTTP ---
+// --- Display OLED, Servidor HTTP e Nuvem MQTT (HiveMQ) ---
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 WebServer server(80);
+
+const char* MQTT_SERVER       = "broker.hivemq.com";
+const int   MQTT_PORT         = 1883;
+const char* MQTT_TOPIC_CMD    = "irriga-ai/ceo-hugovinicius/cmd";
+const char* MQTT_TOPIC_STATUS = "irriga-ai/ceo-hugovinicius/status";
+const char* MQTT_TOPIC_PLAN   = "irriga-ai/ceo-hugovinicius/plan";
+
+WiFiClient espMqttClient;
+PubSubClient mqttClient(espMqttClient);
+uint32_t lastMqttReconnectMs = 0;
+uint32_t lastMqttStatusPubMs = 0;
+
 Preferences prefs;
 bool oledAwake           = true;
 uint32_t lastInteraction = 0;
@@ -556,6 +570,114 @@ void configurarRotasHttp() {
     server.begin();
 }
 
+// --- Funções da Nuvem MQTT (HiveMQ) ---
+void publicarStatusMqtt() {
+    if (!mqttClient.connected()) return;
+    JsonDocument doc;
+    doc["v"]          = "1.5-argon";
+    doc["tank_L"]     = lerCaixaLitros();
+    doc["filter_pct"] = filter_health_pct;
+    doc["flow_lpm"]   = currentFlowLpm;
+    doc["paused"]     = isPaused;
+    doc["boost_pct"]  = boostPct;
+    doc["active_zone"]= activeZoneIdx >= 0 ? (activeZoneIdx + 1) : 0;
+    doc["alert"]      = lastAlertMsg;
+    String out;
+    serializeJson(doc, out);
+    mqttClient.publish(MQTT_TOPIC_STATUS, out.c_str(), true);
+}
+
+void onMqttMessage(char* topic, byte* payload, unsigned int length) {
+    String body;
+    for (unsigned int i = 0; i < length; i++) body += (char)payload[i];
+    Serial.printf("☁️ [MQTT] Mensagem recebida no topico %s: %s\n", topic, body.c_str());
+
+    JsonDocument doc;
+    if (deserializeJson(doc, body)) return;
+
+    if (String(topic) == MQTT_TOPIC_CMD) {
+        String acao = doc["acao"] | "";
+        if (acao == "pausar") {
+            uint32_t h = doc["horas"] | 0;
+            isPaused = true;
+            pauseIndefinite = (h == 0);
+            pauseUntilMs = millis() + h * 3600UL * 1000UL;
+            fecharTodasValvulas();
+            beep(80, 2);
+        } else if (acao == "retomar") {
+            isPaused = false;
+            pauseIndefinite = false;
+            hydraulicLockAlert = false;
+            beep(80, 1);
+        } else if (acao == "regar_agora" || acao == "override_regar_agora") {
+            if (doc["zonas"].is<JsonArray>()) {
+                JsonArray zs = doc["zonas"].as<JsonArray>();
+                for (JsonObject zo : zs) {
+                    int id = zo["zona"] | 0;
+                    float lit = zo["litros"] | 0.0f;
+                    if (id >= 1 && id <= 2 && lit > 1.0f) {
+                        queueLiters[id - 1] += lit;
+                    }
+                }
+                isPaused = false;
+                pauseIndefinite = false;
+                if (activeZoneIdx < 0 && queueLiters[0] >= 2.0f) {
+                    float l = queueLiters[0]; queueLiters[0] = 0; abrirZonaFila(0, l);
+                } else if (activeZoneIdx < 0 && queueLiters[1] >= 2.0f) {
+                    float l = queueLiters[1]; queueLiters[1] = 0; abrirZonaFila(1, l);
+                }
+            } else {
+                enfileirarOverrideFlex1Hora();
+            }
+            beep(120, 2);
+        } else if (acao == "boost") {
+            boostPct = doc["pct"] | 0;
+            boostUntilMs = boostPct > 0 ? (millis() + 24UL * 3600UL * 1000UL) : 0;
+            recalcularPlanoDoDia();
+            beep(60, 1);
+        } else if (acao == "chuva_local") {
+            float mm = doc["mm"] | 0.0f;
+            for (int i = 0; i < 2; i++) zones[i].Dr_mm = max(0.0f, zones[i].Dr_mm - chuvaEfetiva(mm));
+            fecharTodasValvulas();
+            recalcularPlanoDoDia();
+            beep(100, 3);
+        }
+        publicarStatusMqtt();
+    } else if (String(topic) == MQTT_TOPIC_PLAN) {
+        if (doc["quota_L"].is<float>()) daily_quota_L = doc["quota_L"].as<float>();
+        recalcularPlanoDoDia();
+        publicarStatusMqtt();
+    }
+}
+
+void gerenciarMqtt() {
+    uint32_t now = millis();
+    if (WiFi.status() == WL_CONNECTED) {
+        if (!mqttClient.connected()) {
+            if (now - lastMqttReconnectMs > 5000) {
+                lastMqttReconnectMs = now;
+                String clientId = "ESP32-Irriga-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+                Serial.print("☁️ [MQTT] Conectando ao broker HiveMQ... ");
+                if (mqttClient.connect(clientId.c_str())) {
+                    Serial.println("CONECTADO COM SUCESSO!");
+                    mqttClient.subscribe(MQTT_TOPIC_CMD);
+                    mqttClient.subscribe(MQTT_TOPIC_PLAN);
+                    publicarStatusMqtt();
+                    beep(50, 1);
+                } else {
+                    Serial.printf("Aguardando conexao (rc=%d)\n", mqttClient.state());
+                }
+            }
+        } else {
+            mqttClient.loop();
+            if (now - lastMqttStatusPubMs > 10000) {
+                lastMqttStatusPubMs = now;
+                publicarStatusMqtt();
+            }
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
 
@@ -606,8 +728,11 @@ void setup() {
     Serial.println("⚙️ [1/3] Calculando plano hídrico do dia...");
     recalcularPlanoDoDia();
 
-    Serial.println("🌐 [2/3] Iniciando WiFi e Servidor HTTP...");
+    Serial.println("🌐 [2/3] Iniciando WiFi, Servidor HTTP e Nuvem MQTT...");
     configurarRotasHttp();
+    mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+    mqttClient.setCallback(onMqttMessage);
+    mqttClient.setBufferSize(2048);
 
     Serial.println("🔔 [3/3] Inicializando buzzer e interface...");
     lastInteraction = millis();
@@ -618,6 +743,7 @@ void setup() {
 
 void loop() {
     server.handleClient();
+    gerenciarMqtt();
     processarBotoesFisicos();
     atualizarSensorVazaoETravas();
     delay(2);

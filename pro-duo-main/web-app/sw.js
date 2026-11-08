@@ -10,6 +10,9 @@ const CORE_ASSETS = [
   './sheets.js',
   './manifest.json',
   './icon.svg',
+  './apple-touch-icon.png',
+  './icon-192.png',
+  './icon-512.png',
   '../core/crops.js',
   '../core/irriga-core.js',
   '../core/yaml-lite.js'

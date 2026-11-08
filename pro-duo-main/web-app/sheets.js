@@ -21,11 +21,31 @@ function fecharModal() {
 }
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharModal(); });
 
+function destravarPeloModal(btn) {
+  S.ui.locked = false;
+  salvar();
+  render();
+  toast('🔓 Destravado para edições');
+  if (btn) {
+    const box = btn.closest('.locked-note');
+    if (box) {
+      box.outerHTML = `<div class="alert success" style="margin-top:8px;padding:8px 12px;font-size:13px;display:flex;align-items:center;gap:6px"><span>✅ Painel destravado para edições</span></div>`;
+    }
+  }
+  const m = document.getElementById('modal');
+  if (m) {
+    m.querySelectorAll('[disabled]').forEach((el) => {
+      el.removeAttribute('disabled');
+      el.style.opacity = '1';
+    });
+  }
+}
+
 function avisoCadeado() {
   if (!S.ui.locked) return '';
   return `<div class="locked-note row between">
     <span>🔒 Cadeado ativo contra toques acidentais.</span>
-    <button class="btn sm" style="background:var(--card);padding:5px 10px" onclick="S.ui.locked=false;salvar();render();toast('🔓 Destravado para edição')">🔓 Destravar</button>
+    <button class="btn sm" style="background:var(--card);padding:5px 10px" onclick="destravarPeloModal(this)">🔓 Destravar</button>
   </div>`;
 }
 

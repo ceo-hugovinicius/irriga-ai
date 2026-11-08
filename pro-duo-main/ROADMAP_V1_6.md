@@ -42,3 +42,29 @@ Adicionar um novo grupo de culturas forrageiras e de suporte alimentar para o re
      - **Irrigação Automática = `0 L/dia`** naquela zona (o piloto automático não gasta água dos turnos das 04:00 e 16:00 numa zona sem planta).
      - **Override Manual ("💧 Regar Agora") CONTINUA LIBERADO na zona livre!**
        - **Por quê?** Quando o agricultor vai preparar a terra ou acabou de semear o primeiro dia de uma nova safra, é muito útil poder acionar o **Override Manual** (por Horas ou por Litros, ou pelo botão físico `+1h Flex`) para molhar o canteiro antes ou logo no início do plantio, mesmo com a zona marcada como "Canteiro livre".
+
+
+---
+
+## 🎯 Task 3: Sistema de Senha / PIN de Segurança Anti-Griefing (`web-app/app.js`, `web-app/sheets.js`)
+
+1. **Visão Livre em Modo Leitura (Read-Only por Padrão):**
+   - Qualquer pessoa com o link público pode consultar o painel, ver o nível da caixa de 5.000 L, conferir a previsão do tempo e acompanhar o desenvolvimento das plantas sem precisar de login.
+2. **Proteção ao Destravar o Cadeado (`🔒 ➔ 🔓`):**
+   - Ao tocar no botão do cadeado no cabeçalho ou no botão *"🔓 Destravar"* dentro de qualquer modal (ajustes, troca de cultura, override manual):
+     - Exibir um modal elegante solicitando um **PIN numérico (ex: 4 dígitos)**.
+     - PIN padrão inicial (ex: `1234` ou definido pelo dono).
+     - Se o PIN estiver correto, o painel destrava (`🔓`) e libera as edições.
+     - Se errar, exibe aviso e mantém tudo protegido.
+3. **Gerenciamento do PIN:**
+   - Adicionar em **Ajustes do Sítio** a opção de trocar o PIN ou desativar a exigência de senha caso o usuário prefira o destravamento com 1 toque.
+4. **Relock Automático:**
+   - Bloqueia automaticamente após 10 minutos de inatividade para proteger o sítio caso o usuário esqueça o celular aberto.
+
+---
+
+## 🎯 Task 4: Feedback Instantâneo do Cadeado nos Modais (`web-app/sheets.js`) — ✅ Implementado
+
+- Corrigido o comportamento do botão *"🔓 Destravar"* dentro de modais abertos:
+  - Ao destravar, a tarja amarela de aviso agora é substituída imediatamente por uma confirmação verde (`✅ Painel destravado para edições`), sem exigir reabrir o modal.
+  - Todos os botões e seletores que estavam desabilitados (`disabled`) tornam-se imediatamente interativos.

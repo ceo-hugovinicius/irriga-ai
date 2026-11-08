@@ -33,8 +33,6 @@
 
 using namespace IrrigaPins;
 
-Preferences prefs;
-
 // --- Constantes Físicas e Hidráulicas ---
 constexpr float EFICIENCIA_GOTEJO      = 0.88f;
 constexpr float PULSOS_POR_LITRO_SF1   = 450.0f; // Sensor Hall YF-S201 / DN20 padrão
@@ -128,7 +126,7 @@ void enviarTelegramEmergencia(const String& motivo) {
     String url = "https://api.telegram.org/bot" + tgToken + "/sendMessage";
     if (https.begin(client, url)) {
         https.addHeader("Content-Type", "application/json");
-        StaticJsonDocument<512> doc;
+        JsonDocument doc;
         doc["chat_id"] = tgChatId;
         doc["text"] = "🚨 *ALERTA URGENTE DO SABIÁ (ESP32)* 🚨\n" + motivo + "\n\n🛡️ *O microcontrolador desligou o sistema imediatamente para proteger a bomba.*";
         doc["parse_mode"] = "Markdown";
